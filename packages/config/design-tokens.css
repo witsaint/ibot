@@ -1,0 +1,107 @@
+/*
+ * i-bot design tokens — Geist / Vercel·Supabase aesthetic.
+ * Low-saturation neutrals, hairline borders, restrained green accent,
+ * high-end feel from subtle grey shadows + highlights. No AI gradients,
+ * no big radii, no heavy shadows.
+ *
+ * Fonts: Geist Sans + Geist Mono (npm: `geist`, or next/font).
+ * Consume these tokens via Tailwind theme extension or plain var().
+ * Never hardcode a hex in a component — reference a token.
+ */
+
+:root {
+  /* neutrals — light */
+  --bg: #ffffff;
+  --bg-subtle: #fafafa; /* app chrome, inset panels */
+  --surface: #ffffff; /* cards, message bubbles */
+  --surface-hover: #f5f5f5;
+  --border: #ebebeb; /* hairline — the primary separator */
+  --border-strong: #e0e0e0;
+  --ink: #171717; /* primary text */
+  --ink-secondary: #666666;
+  --ink-muted: #8f8f8f; /* captions, timestamps */
+
+  /* accent — restrained low-sat green, key states only */
+  --accent: #3e9b70;
+  --accent-hover: #359065;
+  --accent-ink: #2f7d59; /* accent text on light ground */
+  --accent-ring: rgba(62, 155, 112, 0.35);
+  --accent-soft: rgba(62, 155, 112, 0.08);
+
+  /* semantic — separate from accent, also low-sat */
+  --ok: #3e9b70;
+  --warn: #9a6b2f;
+  --danger: #b4453f;
+
+  /* elevation — the "high-end from grey shadows" rule: subtle, layered */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.04), 0 16px 40px rgba(0, 0, 0, 0.08);
+
+  /* geometry — medium radii, never large */
+  --radius-sm: 6px; /* controls, inputs, buttons */
+  --radius-md: 8px; /* cards, bubbles */
+  --radius-lg: 12px; /* modals, sheets */
+
+  /* motion — micro-interactions only */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 150ms;
+
+  /* type */
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a0a0a;
+    --bg-subtle: #0e0e0e;
+    --surface: #111111;
+    --surface-hover: #171717;
+    --border: #242424; /* hairline on dark */
+    --border-strong: #2e2e2e;
+    --ink: #ededed;
+    --ink-secondary: #a1a1a1;
+    --ink-muted: #6f6f6f;
+
+    --accent: #43b581; /* slightly lifted for dark ground */
+    --accent-hover: #4ec08c;
+    --accent-ink: #5fc99a;
+    --accent-ring: rgba(67, 181, 129, 0.4);
+    --accent-soft: rgba(67, 181, 129, 0.1);
+
+    --ok: #43b581;
+    --warn: #c2985e;
+    --danger: #cf6d67;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --bg-subtle: #0e0e0e;
+  --surface: #111111;
+  --surface-hover: #171717;
+  --border: #242424;
+  --border-strong: #2e2e2e;
+  --ink: #ededed;
+  --ink-secondary: #a1a1a1;
+  --ink-muted: #6f6f6f;
+
+  --accent: #43b581;
+  --accent-hover: #4ec08c;
+  --accent-ink: #5fc99a;
+  --accent-ring: rgba(67, 181, 129, 0.4);
+  --accent-soft: rgba(67, 181, 129, 0.1);
+
+  --ok: #43b581;
+  --warn: #c2985e;
+  --danger: #cf6d67;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.5);
+}

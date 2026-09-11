@@ -1,0 +1,30 @@
+{
+  "name": "i-bot",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-tenant computer-use bot platform. Each user creates independent bots, each backed by an isolated PPIO sandbox.",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "test": "turbo run test",
+    "check-types": "turbo run check-types",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.2",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
+    "turbo": "^2.10.12",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.10.0"
+}

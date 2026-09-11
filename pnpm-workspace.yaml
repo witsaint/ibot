@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+onlyBuiltDependencies:
+  - esbuild
+minimumReleaseAgeExclude:
+  - zod@4.6.2
+  - "@aws-sdk/client-s3@3.1130.0"
+  - "@aws-sdk/s3-request-presigner@3.1130.0"
+  - "@mastra/core@1.66.0"
+
+# Pin common heavy deps here later to keep versions aligned across the workspace.
+# catalog:
+#   ai: ^5.0.0
+#   zod: ^3.24.1

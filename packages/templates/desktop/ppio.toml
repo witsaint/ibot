@@ -1,0 +1,18 @@
+# PPIO/AIProxy template config for the i-bot computer-use desktop.
+# Consumed by the PPIO CLI during `build.sh`. `template_id` is filled in by the
+# CLI on first successful build — copy it back into src/manifest.ts (DESKTOP.templateId).
+#
+# team_id: leave blank to use the CLI's default team, or set to pin a team.
+# Build routes through the AIProxy gateway, so the CLI must target the
+# control-plane URL (SANDBOX_CONTROL_PLANE_URL, incl. /c/{slug}) — see build.sh.
+
+team_id = ""
+dockerfile = "desktop.Dockerfile"
+template_name = "ibot-desktop"
+template_id = ""
+
+# Chromium + Xvfb need a little headroom; the concrete spec is fixed by the
+# template on the control-plane side (create-time cpuCount/memoryMB are ignored).
+[resources]
+cpu_count = 2
+memory_mb = 4096

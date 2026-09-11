@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Opens/updates a "Version Packages" PR. Merging it bumps versions
+      # and changelogs for packages/* per the accumulated changesets.
+      - name: Changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm version-packages
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Railway redeploys web + api on push to main via its native git integration
+  # (watch paths per service). This job is a placeholder for an explicit
+  # `railway up` gate if you later want CI to own the deploy instead.
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ false }} # flip to true to let CI drive deploys
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy API
+        run: npx -y @railway/cli up --service api --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

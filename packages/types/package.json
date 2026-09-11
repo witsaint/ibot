@@ -1,0 +1,27 @@
+{
+  "name": "@i-bot/types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.node.json",
+    "dev": "tsc -p tsconfig.node.json --watch",
+    "check-types": "tsc --noEmit -p tsconfig.node.json",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@i-bot/config": "workspace:*",
+    "typescript": "^5.7.3"
+  }
+}

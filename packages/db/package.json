@@ -1,0 +1,37 @@
+{
+  "name": "@i-bot/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.node.json",
+    "dev": "tsc -p tsconfig.node.json --watch",
+    "check-types": "tsc --noEmit -p tsconfig.node.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.7",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@i-bot/config": "workspace:*",
+    "@i-bot/types": "workspace:*",
+    "drizzle-kit": "^0.31.6",
+    "typescript": "^5.7.3"
+  }
+}

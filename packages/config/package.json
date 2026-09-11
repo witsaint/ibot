@@ -1,0 +1,16 @@
+{
+  "name": "@i-bot/config",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "tsconfig.node.json",
+    "design-tokens.css"
+  ],
+  "exports": {
+    "./design-tokens.css": "./design-tokens.css",
+    "./tsconfig.node.json": "./tsconfig.node.json"
+  },
+  "scripts": {
+    "clean": "rm -rf dist .turbo"
+  }
+}

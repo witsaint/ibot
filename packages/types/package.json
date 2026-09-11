@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.node.json",
     "dev": "tsc -p tsconfig.node.json --watch",
     "check-types": "tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@i-bot/config": "workspace:*",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
   }
 }

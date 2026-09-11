@@ -19,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
       - uses: pnpm/action-setup@v4
 
@@ -32,8 +30,13 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Lint / types / test / build (affected only)
-        run: pnpm turbo run lint check-types test build --affected
+      # oxlint + oxfmt run whole-repo from the root (not turbo tasks) and are fast.
+      - name: Lint
+        run: pnpm lint
 
       - name: Format check
         run: pnpm format:check
+
+      # Per-package graph tasks go through turbo (cached, dependency-ordered).
+      - name: Types, test, build
+        run: pnpm turbo run check-types test build

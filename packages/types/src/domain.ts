@@ -4,11 +4,15 @@ import { z } from "zod";
  *  This file is the contract — change shapes here, not inline. */
 
 // ---------- User ----------
+/** Managed by better-auth (see @i-bot/db auth-schema). Shape mirrors its `user` table. */
 export const User = z.object({
   id: z.string(),
+  name: z.string(),
   email: z.string().email(),
-  name: z.string().nullable(),
+  emailVerified: z.boolean().default(false),
+  image: z.string().nullable().default(null),
   createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
 });
 export type User = z.infer<typeof User>;
 

@@ -1,7 +1,10 @@
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
-  schema: "./src/schema.ts",
+  // Barrel re-exports both auth-schema (better-auth tables) and schema (domain
+  // tables) so every table is emitted — pointing at schema.ts alone would drop
+  // users/sessions/accounts/verifications and leave the ownership FKs dangling.
+  schema: "./src/index.ts",
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

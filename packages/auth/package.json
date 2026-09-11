@@ -1,0 +1,29 @@
+{
+  "name": "@i-bot/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.node.json",
+    "dev": "tsc -p tsconfig.node.json --watch",
+    "check-types": "tsc --noEmit -p tsconfig.node.json",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@i-bot/db": "workspace:*",
+    "better-auth": "^1.7.4"
+  },
+  "devDependencies": {
+    "@i-bot/config": "workspace:*",
+    "@types/node": "^24.13.4",
+    "typescript": "^5.7.3"
+  }
+}

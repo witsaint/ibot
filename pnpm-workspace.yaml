@@ -1,13 +1,28 @@
 packages:
   - "apps/*"
   - "packages/*"
-onlyBuiltDependencies:
-  - esbuild
+# pnpm 11 replaced onlyBuiltDependencies/ignoredBuiltDependencies with allowBuilds
+# (true = compile native build scripts, false = deliberately skip). strictDepBuilds
+# defaults true, so every package with a build script must get an explicit decision
+# or install fails. esbuild (via drizzle-kit) must build; the prisma/sqlite adapters
+# better-auth bundles are unused (we're drizzle + pg) and are skipped on purpose.
+allowBuilds:
+  esbuild: true
+  "@prisma/client": false
+  better-sqlite3: false
 minimumReleaseAgeExclude:
   - zod@4.6.2
   - "@aws-sdk/client-s3@3.1130.0"
   - "@aws-sdk/s3-request-presigner@3.1130.0"
   - "@mastra/core@1.66.0"
+  - "@better-auth/core@1.7.4"
+  - "@better-auth/drizzle-adapter@1.7.4"
+  - "@better-auth/kysely-adapter@1.7.4"
+  - "@better-auth/memory-adapter@1.7.4"
+  - "@better-auth/mongo-adapter@1.7.4"
+  - "@better-auth/prisma-adapter@1.7.4"
+  - "@better-auth/telemetry@1.7.4"
+  - better-auth@1.7.4
 
 # Pin common heavy deps here later to keep versions aligned across the workspace.
 # catalog:

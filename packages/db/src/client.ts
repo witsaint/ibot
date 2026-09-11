@@ -1,7 +1,12 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
+import * as authSchema from "./auth-schema.js";
 import * as schema from "./schema.js";
+
+// Both domain and better-auth tables must be registered so `db.query` and
+// `db._.fullSchema` expose every table — the better-auth drizzle adapter relies on them.
+const fullSchema = { ...authSchema, ...schema };
 
 export type Database = ReturnType<typeof createDb>;
 
@@ -12,5 +17,5 @@ export type Database = ReturnType<typeof createDb>;
  */
 export function createDb(connectionString: string) {
   const sql = postgres(connectionString, { prepare: false });
-  return drizzle(sql, { schema });
+  return drizzle(sql, { schema: fullSchema });
 }

@@ -11,10 +11,15 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { users } from "./auth-schema.js";
 
 /**
  * Postgres schema for i-bot. Mirrors the Zod contract in `@i-bot/types`.
  * Source of truth for skills lives here (never only in a sandbox).
+ *
+ * `users` (and sessions/accounts/verifications) are owned by better-auth and
+ * defined in `./auth-schema.ts`; imported here for the ownership FKs. Because
+ * better-auth ids are `text`, everything that references a user id is `text` too.
  */
 
 // ---------- enums ----------
@@ -33,20 +38,12 @@ export const setupStepKind = pgEnum("setup_step_kind", ["apt", "pip", "npm", "cm
 export const setupStepStatus = pgEnum("setup_step_status", ["pending", "applied", "failed"]);
 export const mcpTransport = pgEnum("mcp_transport", ["stdio", "sse", "http"]);
 
-// ---------- users ----------
-export const users = pgTable("users", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  email: text("email").notNull().unique(),
-  name: text("name"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
 // ---------- bots ----------
 export const bots = pgTable(
   "bots",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    ownerId: uuid("owner_id")
+    ownerId: text("owner_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
@@ -140,8 +137,11 @@ export const skills = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     scope: skillScope("scope").notNull(),
-    /** owner ref depends on scope: botId | userId | orgId | null(public) */
-    ownerRef: uuid("owner_ref"),
+    /**
+     * owner ref depends on scope: botId (uuid) | userId (text) | orgId | null(public).
+     * text so it can hold either a text user id or a uuid bot id (polymorphic).
+     */
+    ownerRef: text("owner_ref"),
     name: text("name").notNull(),
     description: text("description").notNull(),
     playbook: text("playbook").notNull(),

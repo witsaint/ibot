@@ -1,0 +1,13 @@
+diff --git a/dist/chunk-M7G3KDGF.mjs b/dist/chunk-M7G3KDGF.mjs
+index 99cb09d8b130595d1f0d4413f67fbbcc758bb871..8ce4159a4207b012a9a996feeee2268abce65918 100644
+--- a/dist/chunk-M7G3KDGF.mjs
++++ b/dist/chunk-M7G3KDGF.mjs
+@@ -1,3 +1,8 @@
++// [i-bot patch] esbuild ESM build omits the createRequire banner, so its
++// __require("crypto") shim throws under pure ESM (node/tsx). Define a
++// module-scoped require so the shim resolves the builtin. See patches/.
++import { createRequire as __ibotCreateRequire } from "node:module";
++var require = __ibotCreateRequire(import.meta.url);
+ var __defProp = Object.defineProperty;
+ var __defProps = Object.defineProperties;
+ var __getOwnPropDescs = Object.getOwnPropertyDescriptors;

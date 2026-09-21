@@ -19,6 +19,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "ai": "^7.0.97",
     "zod": "^4.6.2"
   },
   "devDependencies": {

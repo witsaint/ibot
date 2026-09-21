@@ -1,7 +1,10 @@
 /*
  * i-bot design tokens — Geist / Vercel·Supabase aesthetic.
- * Low-saturation neutrals, hairline borders, restrained green accent,
- * high-end feel from subtle grey shadows + highlights. No AI gradients,
+ * Low-saturation neutrals, hairline borders, one saturated teal accent
+ * (#03d1ac) reserved for key states — it is bright enough that it must never carry
+ * white text (1.96:1); accents-on-white and on-accent text go through
+ * --accent-ink / --accent-fg instead.
+ * High-end feel from subtle grey shadows + highlights. No AI gradients,
  * no big radii, no heavy shadows.
  *
  * Fonts: Geist Sans + Geist Mono (npm: `geist`, or next/font).
@@ -10,28 +13,48 @@
  */
 
 :root {
-  /* neutrals — light */
+  /* neutrals — light. Backgrounds are pure white; separation comes from hairline
+     borders, not grey fills. --surface-hover is a transient hover tint only, never a
+     resting background. */
   --bg: #ffffff;
-  --bg-subtle: #fafafa; /* app chrome, inset panels */
+  --bg-subtle: #ffffff; /* app chrome, inset panels — white, lean on borders */
   --surface: #ffffff; /* cards, message bubbles */
-  --surface-hover: #f5f5f5;
+  --surface-hover: #f5f5f5; /* momentary hover only */
   --border: #ebebeb; /* hairline — the primary separator */
   --border-strong: #e0e0e0;
   --ink: #171717; /* primary text */
   --ink-secondary: #666666;
   --ink-muted: #8f8f8f; /* captions, timestamps */
 
-  /* accent — restrained low-sat green, key states only */
-  --accent: #3e9b70;
-  --accent-hover: #359065;
-  --accent-ink: #2f7d59; /* accent text on light ground */
-  --accent-ring: rgba(62, 155, 112, 0.35);
-  --accent-soft: rgba(62, 155, 112, 0.08);
+  /* accent — teal, key states only */
+  --accent: #03d1ac;
+  --accent-hover: #03b897;
+  --accent-ink: #027d67; /* accent text on light ground — the raw accent is only 1.96:1 on white, so this is the darkened 5.06:1 variant */
+  --accent-ring: rgba(3, 209, 172, 0.35);
+  --accent-soft: rgba(3, 209, 172, 0.08);
+  --accent-fg: #0a0a0a; /* dark ink ON the accent fill: white on #03d1ac is 1.96:1 and unreadable */
 
-  /* semantic — separate from accent, also low-sat */
-  --ok: #3e9b70;
+  /* semantic — separate from accent, also low-sat. Each has a solid (text/border/dot) and a
+     -soft tint (a filled notice/banner ground) so a status surface never needs a raw hex. */
+  --ok: #027d67; /* same darkened accent as --accent-ink: a status dot/text must read on white */
+  --ok-soft: rgba(3, 209, 172, 0.08);
   --warn: #9a6b2f;
+  --warn-soft: rgba(154, 107, 47, 0.08);
   --danger: #b4453f;
+  --danger-soft: rgba(180, 69, 63, 0.08);
+
+  /* Landing scene — fixed white-paper values keep the public auth surface in one
+     monochrome art direction regardless of the visitor's system theme. */
+  --landing-bg: #ffffff;
+  --landing-surface: #ffffff;
+  --landing-surface-hover: #f6f6f4;
+  --landing-border: #dededb;
+  --landing-border-strong: #c7c7c2;
+  --landing-ink: #191918;
+  --landing-ink-secondary: #5f5f5b;
+  --landing-ink-muted: #85857f;
+  --landing-divider: rgba(25, 25, 24, 0.42);
+  --landing-divider-shadow: rgba(25, 25, 24, 0.12);
 
   /* elevation — the "high-end from grey shadows" rule: subtle, layered */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -64,15 +87,19 @@
     --ink-secondary: #a1a1a1;
     --ink-muted: #6f6f6f;
 
-    --accent: #43b581; /* slightly lifted for dark ground */
-    --accent-hover: #4ec08c;
-    --accent-ink: #5fc99a;
-    --accent-ring: rgba(67, 181, 129, 0.4);
-    --accent-soft: rgba(67, 181, 129, 0.1);
+    --accent: #03d1ac; /* the raw accent already reads 10.1:1 on this ground */
+    --accent-hover: #2adbbd;
+    --accent-ink: #03d1ac; /* accent text on dark — the base already passes */
+    --accent-ring: rgba(3, 209, 172, 0.4);
+    --accent-soft: rgba(3, 209, 172, 0.12);
+    --accent-fg: #0a0a0a; /* dark ink on the accent fill */
 
-    --ok: #43b581;
+    --ok: #03d1ac;
+    --ok-soft: rgba(3, 209, 172, 0.12);
     --warn: #c2985e;
+    --warn-soft: rgba(194, 152, 94, 0.12);
     --danger: #cf6d67;
+    --danger-soft: rgba(207, 109, 103, 0.12);
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -91,15 +118,19 @@
   --ink-secondary: #a1a1a1;
   --ink-muted: #6f6f6f;
 
-  --accent: #43b581;
-  --accent-hover: #4ec08c;
-  --accent-ink: #5fc99a;
-  --accent-ring: rgba(67, 181, 129, 0.4);
-  --accent-soft: rgba(67, 181, 129, 0.1);
+  --accent: #03d1ac; /* the raw accent already reads 10.1:1 on this ground */
+  --accent-hover: #2adbbd;
+  --accent-ink: #03d1ac; /* accent text on dark — the base already passes */
+  --accent-ring: rgba(3, 209, 172, 0.4);
+  --accent-soft: rgba(3, 209, 172, 0.12);
+  --accent-fg: #0a0a0a; /* dark ink on the accent fill */
 
-  --ok: #43b581;
+  --ok: #03d1ac;
+  --ok-soft: rgba(3, 209, 172, 0.12);
   --warn: #c2985e;
+  --warn-soft: rgba(194, 152, 94, 0.12);
   --danger: #cf6d67;
+  --danger-soft: rgba(207, 109, 103, 0.12);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.4);

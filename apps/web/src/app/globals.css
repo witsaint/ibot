@@ -1,0 +1,784 @@
+@import "tailwindcss";
+@import "@i-bot/config/design-tokens.css";
+
+/*
+ * i-bot web — strict design paradigm.
+ * Geist / Vercel·Supabase register: an off-white ground, hairline (#ebebeb) borders as
+ * the PRIMARY separator, ink-on-paper type, one teal accent reserved for
+ * primary actions and live state. NO gradients, NO large radii, NO pure-color filled
+ * blocks, NO heavy shadows. Depth comes from a 1px border + a whisper of grey shadow.
+ * Every color references a design token — never a raw hex in a component.
+ */
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-fg: var(--accent-fg);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+/* Bridge next/font (geist) hashed family vars into our design tokens. */
+:root {
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* ---------- typography ---------- */
+h1,
+h2,
+h3 {
+  font-weight: 560;
+  letter-spacing: -0.014em;
+  margin: 0;
+}
+h1 {
+  font-size: 20px;
+}
+h2 {
+  font-size: 16px;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---------- rendered markdown (assistant prose) ---------- */
+/*
+ * Assistant messages render as markdown. Kept tight and ink-on-paper: block spacing
+ * comes from a single rhythm, code is a hairline-boxed mono, links wear the accent.
+ * First/last child margins collapse so a bubble never carries stray top/bottom space.
+ */
+.prose {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  word-break: break-word;
+}
+.prose > :first-child {
+  margin-top: 0;
+}
+.prose > :last-child {
+  margin-bottom: 0;
+}
+.prose p {
+  margin: 0 0 10px;
+}
+.prose ul,
+.prose ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+.prose li {
+  margin: 2px 0;
+}
+.prose li > p {
+  margin: 0;
+}
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  margin: 16px 0 8px;
+  line-height: 1.3;
+}
+.prose h1 {
+  font-size: 17px;
+}
+.prose h2 {
+  font-size: 15.5px;
+}
+.prose h3 {
+  font-size: 14px;
+}
+.prose h4 {
+  font-size: 13.5px;
+}
+.prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5px 4px;
+}
+.prose pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.prose pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+/*
+ * Syntax highlighting for fenced code (rehype-highlight → lowlight, emits `.hljs-*` classes).
+ * A RESTRAINED theme mapped to our design tokens instead of highlight.js's loud default: four
+ * distinguishable registers (plain ink, teal accent, amber, muted red) so code reads as code
+ * without breaking the ink-on-paper paradigm. Tokens already flip for dark mode, so this follows.
+ */
+.prose .hljs {
+  color: var(--ink);
+  background: transparent;
+}
+.prose .hljs-comment,
+.prose .hljs-quote {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+.prose .hljs-keyword,
+.prose .hljs-built_in,
+.prose .hljs-selector-tag,
+.prose .hljs-literal,
+.prose .hljs-doctag {
+  color: var(--accent-ink);
+}
+.prose .hljs-string,
+.prose .hljs-regexp,
+.prose .hljs-addition {
+  color: var(--warn);
+}
+.prose .hljs-number,
+.prose .hljs-symbol,
+.prose .hljs-deletion,
+.prose .hljs-meta {
+  color: var(--danger);
+}
+.prose .hljs-title,
+.prose .hljs-title.function_,
+.prose .hljs-title.class_,
+.prose .hljs-section,
+.prose .hljs-name {
+  color: var(--ink);
+  font-weight: 560;
+}
+.prose .hljs-attr,
+.prose .hljs-attribute,
+.prose .hljs-property,
+.prose .hljs-variable,
+.prose .hljs-template-variable {
+  color: var(--ink-secondary);
+}
+.prose .hljs-emphasis {
+  font-style: italic;
+}
+.prose .hljs-strong {
+  font-weight: 600;
+}
+/* Keep a wide table inside the bubble: it scrolls horizontally instead of stretching the column. */
+.prose .prose-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 10px;
+}
+.prose .prose-table-wrap table {
+  margin: 0;
+}
+.prose blockquote {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--ink-secondary);
+}
+.prose table {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+  font-size: 12.5px;
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--border);
+  padding: 4px 9px;
+  text-align: left;
+}
+.prose th {
+  background: var(--bg-subtle);
+  font-weight: 560;
+}
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+.prose img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- A2UI generative panels ---------- */
+/*
+ * Bot-rendered interactive panels (A2UI). We render bot UI through the official `basicCatalog`
+ * (Google, Apache-2.0) — production components with built-in accessibility (keyboard, roving
+ * focus, ARIA). We don't re-skin them by hand; the whole basic theme is driven by `--a2ui-*`
+ * CSS custom properties whose defaults ship at ZERO specificity (`:where(:root)`, explicitly
+ * "allowing page styles to override"). So one variable bridge below re-themes every component
+ * to our design tokens at once: colors, borders, radius, fonts, sizing. The renderer lays out
+ * with inline flex/grid, so layout is unaffected — we only recolor.
+ *
+ * Set on `.a2ui-panel` (specificity 0,1,0 and a closer ancestor than `:root`), these win over
+ * the injected defaults and inherit down into `.a2ui-surface` and every child. We map straight
+ * to our tokens, which already flip for dark mode — so NO `light-dark()` here (that would flip
+ * twice). Frame is the same hairline card as the rest of the chat column.
+ */
+.a2ui-panel {
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px;
+  overflow: hidden;
+
+  /* palette → our tokens */
+  --a2ui-color-background: var(--surface);
+  --a2ui-color-on-background: var(--ink);
+  --a2ui-color-surface: var(--bg-subtle);
+  --a2ui-color-on-surface: var(--ink);
+  --a2ui-color-primary: var(--accent);
+  --a2ui-color-primary-hover: var(--accent-hover);
+  --a2ui-color-on-primary: var(--accent-fg);
+  --a2ui-color-secondary: var(--surface);
+  --a2ui-color-secondary-hover: var(--surface-hover);
+  --a2ui-color-on-secondary: var(--ink);
+  --a2ui-color-border: var(--border-strong);
+  --a2ui-color-input: var(--surface);
+  --a2ui-color-on-input: var(--ink);
+
+  /* shape + type → our tokens */
+  --a2ui-border-radius: var(--radius-sm);
+  --a2ui-border-width: 1px;
+  --a2ui-font-family-title: var(--font-sans);
+  --a2ui-font-family-monospace: var(--font-mono);
+  --a2ui-font-size: 13.5px;
+
+  /* component knobs that our flat, hairline paradigm cares about */
+  --a2ui-button-box-shadow: none;
+  --a2ui-textfield-color-border-focus: var(--accent);
+  --a2ui-textfield-color-border-hover: var(--border-strong);
+  --a2ui-textfield-color-error: var(--danger);
+  --a2ui-choicepicker-label-color: var(--ink-secondary);
+  --a2ui-label-color: var(--ink-secondary);
+}
+.a2ui-panel .a2ui-surface {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+/*
+ * Structural fallback for the basic-catalog leaf components.
+ *
+ * ⚠️ `@a2ui/react@0.11.1` ships a BROKEN CSS-modules build: the per-component class maps
+ * (`Text_default`, `Button_default`, `TextField_default`, `ChoicePicker_default`) are all empty
+ * `{}`, so those components render `className={undefined}`, and the extracted `v0_9/index.css`
+ * (which would carry `.input`/`.host`/`.button` rules) is never imported and wouldn't match the
+ * undefined classes anyway. Net effect: only Row/Column/List layout (inline flex + gap) survives;
+ * inputs, buttons, labels, cards and headings come out as raw unstyled browser elements — the
+ * "看不到输入框 / 内容杂乱" the panels showed. The `--a2ui-*` variable bridge above sets values that
+ * nothing consumes.
+ *
+ * So we restyle by ELEMENT under `.a2ui-panel` (robust — independent of the missing classnames),
+ * mapping to our design tokens. If a future `@a2ui/react` fixes the class maps and we import its
+ * `index.css`, these element rules stay compatible (same tokens) and can be trimmed. Scoped tight
+ * to `.a2ui-panel` so nothing leaks into the rest of the chat. NOTE: the package bug also erases
+ * Button variant classes, so primary/borderless can't be distinguished here — every panel button
+ * gets one neutral treatment.
+ */
+
+/* form controls inherit the panel's family (browser defaults to its own for inputs/buttons) */
+.a2ui-panel :is(input, textarea, select, button, label) {
+  font-family: inherit;
+}
+
+/* headings (Text h1–h5 render as real heading tags inside a wrapper div) */
+.a2ui-panel :is(h1, h2, h3, h4, h5) {
+  margin: 0;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.a2ui-panel h1 {
+  font-size: 17px;
+}
+.a2ui-panel h2 {
+  font-size: 15.5px;
+}
+.a2ui-panel h3 {
+  font-size: 14px;
+}
+.a2ui-panel :is(h4, h5) {
+  font-size: 13.5px;
+}
+
+/* labels (TextField / CheckBox / ChoicePicker / Slider / DateTimeInput) */
+.a2ui-panel label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+/* text + number inputs and multiline */
+.a2ui-panel
+  :is(
+    input[type="text"],
+    input[type="number"],
+    input[type="password"],
+    input[type="email"],
+    input[type="search"],
+    input:not([type]),
+    textarea,
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"]
+  ) {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 8px 11px;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.a2ui-panel textarea {
+  resize: vertical;
+  min-height: 68px;
+  line-height: 1.5;
+}
+.a2ui-panel :is(input, textarea)::placeholder {
+  color: var(--ink-muted);
+}
+.a2ui-panel :is(input, textarea):focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* checkboxes / radios keep the browser control but wear the accent + a real gap from their label */
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0 6px 0 0;
+  flex: none;
+}
+
+/* buttons (Button, and any control the panel renders as <button>) — neutral hairline, our tokens */
+.a2ui-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.a2ui-panel button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+.a2ui-panel button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.a2ui-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* card / modal surfaces (real string classes, but the package ships no CSS for them) */
+.a2ui-panel .a2ui-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+}
+.a2ui-panel .a2ui-modal-overlay {
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+.a2ui-panel .a2ui-modal-close {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink-secondary);
+}
+
+/* ---------- layout primitives ---------- */
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* hairline top bar */
+.topbar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: saturate(180%) blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--surface-hover);
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.btn-ghost:hover {
+  background: var(--surface-hover);
+}
+.btn-danger:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+/* ---------- inputs ---------- */
+.input,
+.textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 11px;
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.textarea {
+  resize: none;
+  line-height: 1.5;
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ink-muted);
+}
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* chat composer — the bordered box gets the same focus ring as a single input */
+.composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+/* ---------- surfaces ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.card-hover {
+  transition:
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+.card-hover:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+/* ---------- misc ---------- */
+.muted {
+  color: var(--ink-muted);
+}
+.secondary {
+  color: var(--ink-secondary);
+}
+.divider {
+  height: 1px;
+  background: var(--border);
+  border: 0;
+}
+
+/* status dot */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.dot-ok {
+  background: var(--ok);
+}
+.dot-warn {
+  background: var(--warn);
+}
+.dot-danger {
+  background: var(--danger);
+}
+.dot-muted {
+  background: var(--ink-muted);
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.dot-live {
+  animation: pulse 1.6s var(--ease) infinite;
+}
+
+/* rail hover card: a whisper of rise-and-fade, keeping the vertical-center transform */
+@keyframes railpop {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+
+/* rail right-click menu: same fade but anchored top-left at the cursor (no centering transform) */
+@keyframes railmenu {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* subtle spin for loaders */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--ink-secondary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Hide the scrollbar chrome while keeping the area scrollable (chat transcript). Content still
+   scrolls by wheel/trackpad/keys; we just drop the visible track for a cleaner column. */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* WebKit */
+}
+
+/* Send button "conveyor belt": on hover the current arrow rides up and off the top while an
+   identical one rides up into its place from below — like a belt carrying one arrow away and the
+   next in. Two stacked arrows in a clipped window; hover shifts the pair up by one slot. */
+@keyframes sendbelt {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-50%);
+  }
+}
+.send-belt {
+  display: flex;
+  flex-direction: column;
+  /* two arrows stacked; the window (button) clips to one. */
+  animation: none;
+}
+.send-btn:hover:not(:disabled) .send-belt {
+  animation: sendbelt 0.42s var(--ease) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .send-btn:hover:not(:disabled) .send-belt {
+    animation: none;
+  }
+}
+
+/* Rail avatar state: only OFFLINE bots (paused / errored) grey out — a dropped bot reads as
+   dimmed and desaturated, everyone else stays full color. Selection is signalled separately
+   (the selected bot puts on sunglasses, see .rail-shades). */
+.rail-avatar {
+  transition:
+    filter var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+.rail-avatar.is-offline {
+  filter: grayscale(0.9);
+  opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-avatar {
+    transition: none;
+  }
+}
+
+/* Selected bot "puts on shades": the sunglasses drop in from just above the eyes and settle.
+   Purely a selection cue; under reduced-motion they render already-settled. */
+@keyframes shadesdrop {
+  from {
+    opacity: 0;
+    transform: translateY(-14%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rail-shades {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: shadesdrop 0.3s var(--ease) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-shades {
+    animation: none;
+  }
+}

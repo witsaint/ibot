@@ -1,0 +1,1245 @@
+<title>i-bot 架构蓝图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+/>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --surface-2: #fbfcfd;
+    --ink: #171a1f;
+    --ink-2: #4b525c;
+    --ink-3: #838a94;
+    --line: #e3e6eb;
+    --line-2: #eef0f3;
+    --accent: #2f6f7a;
+    --accent-ink: #235058;
+    --accent-soft: rgba(47, 111, 122, 0.07);
+    --ok: #3b7a5a;
+    --warn: #94672e;
+    --crit: #a24a44;
+    --ok-soft: rgba(59, 122, 90, 0.08);
+    --warn-soft: rgba(148, 103, 46, 0.09);
+    --crit-soft: rgba(162, 74, 68, 0.08);
+    --shadow: 0 1px 2px rgba(20, 24, 30, 0.04), 0 8px 24px rgba(20, 24, 30, 0.04);
+
+    --sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --measure: 44rem;
+    --wide: 68rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1216;
+      --surface: #161a20;
+      --surface-2: #12161b;
+      --ink: #e7eaee;
+      --ink-2: #a2aab4;
+      --ink-3: #6c747e;
+      --line: #262b33;
+      --line-2: #1d222a;
+      --accent: #5ca6b0;
+      --accent-ink: #7fbec7;
+      --accent-soft: rgba(92, 166, 176, 0.11);
+      --ok: #6bae86;
+      --warn: #c29a5e;
+      --crit: #c87e77;
+      --ok-soft: rgba(107, 174, 134, 0.12);
+      --warn-soft: rgba(194, 154, 94, 0.12);
+      --crit-soft: rgba(200, 126, 119, 0.12);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1216;
+    --surface: #161a20;
+    --surface-2: #12161b;
+    --ink: #e7eaee;
+    --ink-2: #a2aab4;
+    --ink-3: #6c747e;
+    --line: #262b33;
+    --line-2: #1d222a;
+    --accent: #5ca6b0;
+    --accent-ink: #7fbec7;
+    --accent-soft: rgba(92, 166, 176, 0.11);
+    --ok: #6bae86;
+    --warn: #c29a5e;
+    --crit: #c87e77;
+    --ok-soft: rgba(107, 174, 134, 0.12);
+    --warn-soft: rgba(194, 154, 94, 0.12);
+    --crit-soft: rgba(200, 126, 119, 0.12);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px clamp(16px, 4vw, 40px);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .mark {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .topbar .mark b {
+    color: var(--accent);
+  }
+  .topbar .spacer {
+    flex: 1;
+  }
+  .toc-links {
+    display: none;
+    gap: 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+  }
+  .toc-links a {
+    color: var(--ink-3);
+    text-decoration: none;
+  }
+  .toc-links a:hover {
+    color: var(--accent);
+  }
+  @media (min-width: 900px) {
+    .toc-links {
+      display: flex;
+    }
+  }
+  .theme-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    background: var(--surface);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  .theme-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .theme-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- layout ---------- */
+  .wrap {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 0 clamp(16px, 4vw, 40px);
+  }
+  main {
+    padding-bottom: 96px;
+  }
+  .col {
+    max-width: var(--measure);
+  }
+  section {
+    padding-top: 64px;
+  }
+  section > .wrap > * {
+    scroll-margin-top: 80px;
+  }
+
+  /* ---------- hero ---------- */
+  .hero {
+    padding-top: 56px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(2.2rem, 6vw, 3.4rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .dek {
+    font-size: 1.18rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 40rem;
+    margin: 0 0 28px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    padding: 4px 9px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--ink-2);
+    background: var(--surface);
+  }
+  .chip.on {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  /* ---------- headings ---------- */
+  h2 {
+    font-size: 1.7rem;
+    letter-spacing: -0.01em;
+    font-weight: 650;
+    margin: 0 0 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .sub {
+    color: var(--ink-3);
+    font-size: 0.98rem;
+    margin: 0 0 28px;
+    font-family: var(--mono);
+    letter-spacing: 0.02em;
+  }
+  h3 {
+    font-size: 1.16rem;
+    font-weight: 600;
+    margin: 34px 0 10px;
+    letter-spacing: -0.005em;
+  }
+  p {
+    margin: 0 0 16px;
+  }
+  .col p,
+  .col ul,
+  .col ol {
+    max-width: var(--measure);
+  }
+  a {
+    color: var(--accent-ink);
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  strong {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    padding: 1.5px 5px;
+    border-radius: 3px;
+  }
+  ul,
+  ol {
+    padding-left: 20px;
+    margin: 0 0 16px;
+  }
+  li {
+    margin: 5px 0;
+  }
+  li::marker {
+    color: var(--ink-3);
+  }
+  hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+
+  /* ---------- callout ---------- */
+  .call {
+    border: 1px solid var(--line);
+    border-left-width: 3px;
+    border-radius: 4px;
+    padding: 16px 18px;
+    margin: 22px 0;
+    background: var(--surface);
+    max-width: var(--measure);
+  }
+  .call .tag {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 6px;
+  }
+  .call p:last-child {
+    margin-bottom: 0;
+  }
+  .call.ok {
+    border-left-color: var(--ok);
+    background: var(--ok-soft);
+  }
+  .call.ok .tag {
+    color: var(--ok);
+  }
+  .call.warn {
+    border-left-color: var(--warn);
+    background: var(--warn-soft);
+  }
+  .call.warn .tag {
+    color: var(--warn);
+  }
+  .call.crit {
+    border-left-color: var(--crit);
+    background: var(--crit-soft);
+  }
+  .call.crit .tag {
+    color: var(--crit);
+  }
+  .call.accent {
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .call.accent .tag {
+    color: var(--accent-ink);
+  }
+
+  /* ---------- tables ---------- */
+  .tbl-wrap {
+    overflow-x: auto;
+    margin: 20px 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    min-width: 560px;
+  }
+  th,
+  td {
+    text-align: left;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line-2);
+    vertical-align: top;
+  }
+  thead th {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    font-weight: 500;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  tbody tr:hover td {
+    background: var(--surface-2);
+  }
+  td .mono,
+  .mono {
+    font-family: var(--mono);
+    font-size: 0.9em;
+  }
+  td .pill {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    white-space: nowrap;
+  }
+  .pick {
+    color: var(--ok);
+    font-weight: 600;
+  }
+
+  /* ---------- code block ---------- */
+  pre {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin: 20px 0;
+    max-width: var(--measure);
+    color: var(--ink);
+  }
+  pre .c {
+    color: var(--ink-3);
+  }
+  pre .k {
+    color: var(--accent-ink);
+  }
+  pre .s {
+    color: var(--ok);
+  }
+
+  /* ---------- architecture diagram ---------- */
+  .diagram {
+    margin: 28px 0 8px;
+  }
+  .layer {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .layer.exec {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  }
+  .layer-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .layer-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 3px 8px;
+    background: var(--accent-soft);
+  }
+  .layer-title {
+    font-weight: 600;
+    font-size: 1.02rem;
+  }
+  .layer-role {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-left: auto;
+  }
+  .layer-body {
+    color: var(--ink-2);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .layer-body .mods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .layer-body .mod {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 3px 8px;
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    color: var(--ink-2);
+    background: var(--surface-2);
+  }
+  .connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .connector .line {
+    width: 1px;
+    height: 16px;
+    background: var(--line);
+  }
+  .connector .proto {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--ink-3);
+    padding: 3px 10px;
+    border: 1px dashed var(--line);
+    border-radius: 20px;
+    background: var(--bg);
+  }
+
+  /* ---------- route cards (computer-use vs browser-use) ---------- */
+  .routes {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin: 24px 0;
+  }
+  @media (min-width: 720px) {
+    .routes {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+  .route {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    background: var(--surface);
+  }
+  .route h4 {
+    margin: 0 0 4px;
+    font-size: 0.98rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .route .badge {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+  }
+  .route.cdp .badge {
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .route.px .badge {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .route.human .badge {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .route p {
+    font-size: 13.5px;
+    color: var(--ink-2);
+    margin: 0 0 8px;
+  }
+  .route .ex {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-3);
+    border-top: 1px solid var(--line-2);
+    padding-top: 8px;
+  }
+
+  /* ---------- footer / sources ---------- */
+  .src-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px 24px;
+    margin: 16px 0;
+    max-width: var(--measure);
+  }
+  @media (min-width: 640px) {
+    .src-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .src-grid a {
+    font-size: 13.5px;
+    display: block;
+    padding: 3px 0;
+  }
+  footer {
+    border-top: 1px solid var(--line);
+    margin-top: 72px;
+    padding-top: 28px;
+    color: var(--ink-3);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .lead-note {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 0;
+    margin: 32px 0 0;
+    max-width: var(--measure);
+  }
+</style>
+
+<div class="topbar">
+  <span class="mark"><b>i-bot</b> · 架构蓝图</span>
+  <span class="spacer"></span>
+  <nav class="toc-links">
+    <a href="#insight">洞察</a>
+    <a href="#arch">架构</a>
+    <a href="#stack">选型</a>
+    <a href="#orchestration">编排</a>
+    <a href="#computer-use">操控</a>
+    <a href="#tenancy">多租户</a>
+    <a href="#build">构建</a>
+    <a href="#risks">风险</a>
+  </nav>
+  <button class="theme-btn" id="themeBtn" aria-label="切换主题">◐ 主题</button>
+</div>
+
+<main>
+  <!-- HERO -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="eyebrow">调研报告 · 2026-09-11 · 决策就绪</p>
+      <h1>面向多租户的 Computer-Use Bot 平台</h1>
+      <p class="dek">
+        对标 Grok Bot:每个用户创建独立 bot,每个 bot 由一个隔离的 PPIO Sandbox(Xvfb + Chrome +
+        overlay 磁盘)承接。本文给出核心洞察、三层架构、技术选型、编排层决策,以及 computer-use ×
+        browser-use 的融合实现路径。
+      </p>
+      <div class="meta-row">
+        <span class="chip on">PPIO Sandbox</span>
+        <span class="chip on">Vercel AI SDK v5</span>
+        <span class="chip">NestJS 12</span>
+        <span class="chip">Next.js 16</span>
+        <span class="chip">Turborepo 2.10</span>
+        <span class="chip">Railway</span>
+      </div>
+      <p class="lead-note">
+        来源分级:标注「已验证」的结论来自对本地 <code>ppio-sandbox</code> SDK
+        源码的直接阅读;其余来自 xAI/官方文档与 2026 年第三方资料,计费与版本以官方页面为准。
+      </p>
+    </div>
+  </header>
+
+  <!-- 0. INSIGHT -->
+  <section id="insight">
+    <div class="wrap col">
+      <h2><span class="num">00</span>核心洞察</h2>
+      <p class="sub">你不需要自己造执行层。</p>
+      <p>
+        <strong>PPIO Sandbox SDK 就是 Grok Bot computer-use 那套执行层的开源等价物</strong>,而且 E2B
+        兼容。本地的 <code>agent-sandbox-sdks-ppio</code> 与已发布的
+        <code>ppio-sandbox@1.1.3</code> 已经把 Grok Bot 口述的整套能力封装完毕。
+      </p>
+      <div class="call ok">
+        <p class="tag">已验证 · 源码级</p>
+        <p>
+          <code>ppio-sandbox/desktop</code> 导出完整 18 个桌面动作(<code
+            >screenshot / leftClick / drag / mousePress / mouseRelease / scroll / write /
+            press</code
+          >
+          …),内置 <code>VNCServer</code> 流用于人机接管。sandbox 内任意端口经
+          <code>getHost(port)</code> 自动映射为公网子域名 —— 这正是 CDP 口与 noVNC
+          预览被外部访问的机制。
+        </p>
+      </div>
+      <p>
+        因此工程重心不在「搭 Xvfb / VNC / CDP」,而在
+        <strong>决策层(agent 编排)+ Web(多租户产品)</strong>。你的服务 = Grok 的「对话宿主」,PPIO
+        Sandbox = 「云电脑」,中间用 SDK 通信。
+      </p>
+    </div>
+  </section>
+
+  <!-- 1. ARCHITECTURE -->
+  <section id="arch">
+    <div class="wrap">
+      <div class="col">
+        <h2><span class="num">01</span>三层架构</h2>
+        <p class="sub">控制面在会话循环,执行面在 sandbox。</p>
+      </div>
+      <div class="diagram">
+        <div class="layer">
+          <div class="layer-head">
+            <span class="layer-tag">apps/web</span>
+            <span class="layer-title">Next.js 16 · 黑白灰科技 UI</span>
+            <span class="layer-role">用户 / 多人</span>
+          </div>
+          <div class="layer-body">
+            聊天界面 · Bot 管理 · 实时桌面预览(嵌入 noVNC iframe)· 登录接管(handoff)。仅作薄
+            BFF,不承载编排逻辑。
+            <div class="mods">
+              <span class="mod">useChat</span><span class="mod">SSE 流</span
+              ><span class="mod">noVNC iframe</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector">
+          <span class="line"></span><span class="proto">SSE / REST / WebSocket</span
+          ><span class="line"></span>
+        </div>
+        <div class="layer">
+          <div class="layer-head">
+            <span class="layer-tag">apps/api</span>
+            <span class="layer-title">NestJS 12 · 决策 / 编排层</span>
+            <span class="layer-role">Railway</span>
+          </div>
+          <div class="layer-body">
+            Grok 口中的「对话宿主」。Auth · Bots · Agent Loop(Vercel AI SDK)· Webhooks ·
+            流式转发。一个进程并发跑 N 个租户的 agent 循环,靠 <code>context</code> 隔离。
+            <div class="mods">
+              <span class="mod">streamText</span><span class="mod">stopWhen</span
+              ><span class="mod">@Sse()</span><span class="mod">WS Gateway</span
+              ><span class="mod">webhook 验签</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector">
+          <span class="line"></span
+          ><span class="proto">ppio-sandbox SDK · envd RPC :49983 · CDP :9222 · VNC :5900</span
+          ><span class="line"></span>
+        </div>
+        <div class="layer exec">
+          <div class="layer-head">
+            <span class="layer-tag">PPIO Sandbox</span>
+            <span class="layer-title">执行层 · 每 bot 一个隔离实例</span>
+            <span class="layer-role">PPIO</span>
+          </div>
+          <div class="layer-body">
+            Grok 口中的「云电脑」。Xvfb 虚拟屏 + xfce4 + Chrome + overlay 磁盘,独立
+            <code>sandboxId</code> 与 Chrome profile。端口经
+            <code>${port}-${sandboxId}.sandbox.ppio.cn</code> 暴露。
+            <div class="mods">
+              <span class="mod">Xvfb</span><span class="mod">xfwm4</span
+              ><span class="mod">Chrome + CDP</span><span class="mod">x11vnc + noVNC</span
+              ><span class="mod">overlay fs</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="call accent">
+          <p class="tag">与「人在本机 SSH」的差别</p>
+          <p>
+            不是一条长挂的交互 shell,而是<strong>无状态一轮轮工具调用</strong> + sandbox
+            内<strong>有状态的桌面/磁盘</strong>。同步单位是「工具结果 / 截图 /
+            发回聊天的消息」,不是共享内存或实时像素流进模型。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. STACK -->
+  <section id="stack">
+    <div class="wrap">
+      <div class="col">
+        <h2><span class="num">02</span>技术选型</h2>
+        <p class="sub">版本已核对至 2026-09,给出决断而非清单。</p>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>层</th>
+              <th>选型</th>
+              <th>决策理由</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>编排</strong></td>
+              <td>
+                <span class="pick">Vercel AI SDK v5</span><br /><span class="mono"
+                  >放后端,不在 sandbox 跑 Codex</span
+                >
+              </td>
+              <td>
+                一进程并发跑 N 租户循环,<code>context</code> 天然隔离;<code>@ai-sdk/anthropic</code>
+                的 <code>computer_*</code> 为 client-executed,完美映射「后端决策→sandbox
+                执行」;provider 可换。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>后端</strong></td>
+              <td>
+                <span class="pick">NestJS 12.0.1</span><br /><span class="mono">独立服务</span>
+              </td>
+              <td>
+                编排是长连接有状态,和 serverless 天生打架。Nest 的 <code>@Sse()</code>/WS
+                gateway/guards(webhook 验签)/DI 正中需求。不塞进 Next Route Handlers。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Web</strong></td>
+              <td><span class="pick">Next.js 16.3</span></td>
+              <td>App Router + <code>useChat</code> 流式原生;仅做薄 BFF/代理,不做主 API。</td>
+            </tr>
+            <tr>
+              <td><strong>Monorepo</strong></td>
+              <td><span class="pick">Turborepo 2.10.12</span> + pnpm</td>
+              <td>
+                用 <code>tasks</code> 键(非 <code>pipeline</code>);<code>--affected</code>
+                只构建改动包;远程缓存。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Lint / Format</strong></td>
+              <td><span class="pick">oxlint 1.82</span> + Prettier</td>
+              <td>
+                类型感知 lint 已于 2026-07 stable,快 50–100×,替代 ESLint。<code>oxfmt 0.67</code> 仍
+                beta,先留 Prettier。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>部署</strong></td>
+              <td><span class="pick">Railway</span></td>
+              <td>
+                一 app 一 service,私网 <code>*.railway.internal</code>;IaC(<code>railway.toml</code>
+                2026-12-01 弃用);Postgres/Redis 同项目挂载。
+              </td>
+            </tr>
+            <tr>
+              <td><strong>版本管理</strong></td>
+              <td><span class="pick">Changesets 3.0</span></td>
+              <td>
+                每 PR 一个 changeset,自动开「Version Packages」PR;GitHub Actions,merge main →
+                Railway 重部署。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. ORCHESTRATION -->
+  <section id="orchestration">
+    <div class="wrap">
+      <div class="col">
+        <h2><span class="num">03</span>编排层:AI SDK vs Codex</h2>
+        <p class="sub">这是全局最关键的一个二选一。</p>
+        <p>
+          两个候选:后端用 <strong>Vercel AI SDK</strong> 远程驱动 sandbox 工具,或每个 sandbox 内跑
+          <strong>OpenAI Codex CLI</strong>。
+        </p>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>维度</th>
+              <th>AI SDK(后端)</th>
+              <th>Codex(sandbox 内)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>并发</td>
+              <td class="pick">一进程 N 个异步循环,<code>context</code> 隔离</td>
+              <td>每租户一个 <code>codex app-server</code> 子进程,更重</td>
+            </tr>
+            <tr>
+              <td>Provider</td>
+              <td class="pick">Anthropic + OpenAI 可换(AI Gateway)</td>
+              <td>锁定 OpenAI</td>
+            </tr>
+            <tr>
+              <td>Computer-use 契合</td>
+              <td class="pick"><code>computer_*</code> 为 client-executed,映射远程执行</td>
+              <td>桌面 app / 像素向,非无头 Linux 浏览器</td>
+            </tr>
+            <tr>
+              <td>流式 UX</td>
+              <td class="pick">
+                <code>toUIMessageStreamResponse</code> + <code>useChat</code> 原生
+              </td>
+              <td>需自行把 <code>runStreamed</code> 事件翻成 SSE</td>
+            </tr>
+            <tr>
+              <td>成本 / 可观测</td>
+              <td class="pick">自控 loop、模型、<code>stopWhen</code> 步数;OTel span</td>
+              <td>内部 loop 对 token/步数更不透明</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="col">
+        <div class="call ok">
+          <p class="tag">决策</p>
+          <p>
+            <strong>后端用 Vercel AI SDK 驱动远程 sandbox 工具。</strong> Codex
+            仅作为可选的「sandbox 内编码专家」(<code>@openai/codex-sdk</code> /
+            MCP)保留给做软件任务的 bot,编排主干仍是 AI SDK。
+          </p>
+        </div>
+        <p>
+          Agent loop 用 <code>generateText</code>/<code>streamText</code> 的
+          <code>stopWhen: stepCountIs(n)</code> 控制多步(替代旧 <code>maxSteps</code>);computer-use
+          场景把上限提到 100+。工具用
+          <code>tool({ description, inputSchema: z.object(...), execute })</code> 定义,<code
+            >execute</code
+          >
+          把动作转发给远程 sandbox 并回传截图。
+        </p>
+        <div class="call warn">
+          <p class="tag">注意 · open-codex-computer-use</p>
+          <p>
+            <code>iFurySt/open-codex-computer-use</code> 是一个走「accessibility API + 截图」的 MCP
+            server,面向桌面 accessibility,<strong>未见确认的 Xvfb 无头 Linux 工作流</strong
+            >。可作为「把 Codex 接到 computer-use」的参考模式,不是多租户生产可直接落地的组件。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. COMPUTER USE -->
+  <section id="computer-use">
+    <div class="wrap">
+      <div class="col">
+        <h2><span class="num">04</span>Computer-Use × Browser-Use 融合</h2>
+        <p class="sub">同一块 $DISPLAY 上,DOM 操作与像素操作会抢屏。</p>
+        <p>
+          核心矛盾:CDP(DOM)与像素(截图+坐标)控制同一屏。解法是<strong>分工 + 单一控制者</strong> ——
+          按任务类型路由到三条路径之一,同一时刻只有一个桌面控制者。
+        </p>
+      </div>
+      <div class="wrap" style="padding-left: 0; padding-right: 0">
+        <div class="routes">
+          <div class="route cdp">
+            <h4>Browser-Use <span class="badge">首选 · CDP</span></h4>
+            <p>网页任务:点按钮、填表、导航、读 DOM。经 Chrome 远程调试口,快、稳、不靠坐标。</p>
+            <p class="ex">→ Playwright/CDP client 连 <code>9222-{id}.sandbox.ppio.cn</code></p>
+          </div>
+          <div class="route px">
+            <h4>Computer-Use <span class="badge">兜底 · 像素</span></h4>
+            <p>系统级:原生密码框、文件对话框、<strong>滑块验证码</strong>。截图 → 坐标 → 动作。</p>
+            <p class="ex">→ desktop.screenshot() + leftClick/drag</p>
+          </div>
+          <div class="route human">
+            <h4>Human Handoff <span class="badge">接管 · VNC</span></h4>
+            <p>登录 / 扫码 / 过验证。VNC 全屏交给人,agent 本轮暂停派屏,交还后再截图感知。</p>
+            <p class="ex">→ stream.getUrl({ viewOnly:false })</p>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <h3>桌面动作 API(已验证 · <code>ppio-sandbox/desktop</code>)</h3>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>类别</th>
+              <th>方法</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>观察</td>
+              <td class="mono">screenshot(fmt?) · getScreenSize() · getCursorPosition()</td>
+              <td>取屏、尺寸、光标位;喂给模型做视觉决策</td>
+            </tr>
+            <tr>
+              <td>点击</td>
+              <td class="mono">leftClick · rightClick · doubleClick · middleClick (x?, y?)</td>
+              <td>坐标点击(0..W-1 × 0..H-1)</td>
+            </tr>
+            <tr>
+              <td>移动/滚动</td>
+              <td class="mono">moveMouse(x,y) · scroll(dir?, amount?)</td>
+              <td>移动光标、滚动页面</td>
+            </tr>
+            <tr>
+              <td>拖拽</td>
+              <td class="mono">mousePress(btn?) · mouseRelease(btn?) · drag([x1,y1],[x2,y2])</td>
+              <td>按下/松开/拖动 —— 滑块验证码路径</td>
+            </tr>
+            <tr>
+              <td>键盘</td>
+              <td class="mono">write(text, opts?) · press(key | key[])</td>
+              <td>输入文本、组合键</td>
+            </tr>
+            <tr>
+              <td>窗口/应用</td>
+              <td class="mono">
+                launch(app,uri?) · open(url) · getApplicationWindows(app) · getWindowTitle(id)
+              </td>
+              <td>启动应用、打开 URL、窗口管理</td>
+            </tr>
+            <tr>
+              <td>流</td>
+              <td class="mono">stream.start(opts?) · stream.getUrl(opts?) · stream.stop()</td>
+              <td>拉起 x11vnc + noVNC,返回可嵌网页的桌面 URL</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="col">
+        <h3>滑块验证码 = press → move(分段) → release</h3>
+        <pre><span class="c">// 你特意问的滑块:本质是一段带节奏的 drag,失败重截图重试</span>
+<span class="k">const</span> { width, height } = <span class="k">await</span> desktop.getScreenSize()
+<span class="k">await</span> desktop.moveMouse(startX, startY)
+<span class="k">await</span> desktop.mousePress(<span class="s">'left'</span>)
+<span class="k">for</span> (<span class="k">const</span> x <span class="k">of</span> segments(startX, targetX)) {   <span class="c">// 分段 + 抖动,拟人</span>
+  <span class="k">await</span> desktop.moveMouse(x, startY + jitter())
+  <span class="k">await</span> desktop.wait(rand(12, 40))
+}
+<span class="k">await</span> desktop.mouseRelease(<span class="s">'left'</span>)
+<span class="k">const</span> shot = <span class="k">await</span> desktop.screenshot()        <span class="c">// 校验成功,否则重试</span></pre>
+        <div class="call accent">
+          <p class="tag">同屏互斥规则</p>
+          <p>
+            Browser(CDP)与 Desktop(像素)共用一块
+            <code>$DISPLAY</code>。同一时刻只允许一个桌面控制者。人接管时,agent
+            本轮<strong>不得</strong>再派桌面点击;人交还后,agent 下一轮靠截图/读 DOM
+            才能「看见」变化。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. TENANCY -->
+  <section id="tenancy">
+    <div class="wrap col">
+      <h2><span class="num">05</span>多租户模型</h2>
+      <p class="sub">一个 bot ↔ 一个 sandboxId。</p>
+      <p>
+        「每人独立 bot、每 bot 独立空间」在 sandbox 层天然成立:<code
+          >Sandbox.create('desktop', …)</code
+        >
+        每次产出隔离实例,有独立 <code>sandboxId</code>、独立 overlay 磁盘、独立 Chrome
+        profile。平台侧维护 <code>bot ↔ sandboxId</code> 映射与生命周期。
+      </p>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>状态</th>
+              <th>触发</th>
+              <th>动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">create</td>
+              <td>用户新建 bot / 首次对话</td>
+              <td>按自定义模板拉起 sandbox,记 <code>sandboxId</code>,启动 VNC 流</td>
+            </tr>
+            <tr>
+              <td class="mono">active</td>
+              <td>对话中 / agent 循环执行</td>
+              <td>后端持 SDK 句柄驱动;工具结果流式回 Web</td>
+            </tr>
+            <tr>
+              <td class="mono">idle → pause</td>
+              <td>超时无活动</td>
+              <td>暂停 sandbox 省成本;保留 overlay 磁盘与登录态</td>
+            </tr>
+            <tr>
+              <td class="mono">resume</td>
+              <td>用户回来 / webhook 唤醒</td>
+              <td>恢复实例,重连 CDP/VNC</td>
+            </tr>
+            <tr>
+              <td class="mono">kill</td>
+              <td>删除 bot / 长期不用</td>
+              <td>回收 sandbox;持久数据落 DB/对象存储</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="call warn">
+        <p class="tag">成本 / 隔离</p>
+        <p>
+          每个活跃 bot 是一台真实云桌面 —— 成本随并发 bot 数线性增长。<strong
+            >idle 自动暂停 + 池化预热</strong
+          >是控成本关键。绝不跨租户共享 sandbox;sandbox 的 envd access token 绝不落日志。
+        </p>
+      </div>
+      <p>
+        自定义环境:CLI 的 <code>template build/publish</code>(基于 Dockerfile)可预装飞连、lark-cli
+        等,做成你自己的基础镜像。
+      </p>
+    </div>
+  </section>
+
+  <!-- 6. BUILD -->
+  <section id="build">
+    <div class="wrap col">
+      <h2><span class="num">06</span>Monorepo · CI/CD · 维护</h2>
+      <p class="sub">GitHub + Turborepo + Changesets + Railway。</p>
+      <pre>i-bot/
+├─ apps/
+│  ├─ web/          <span class="c"># Next.js 16 — 聊天 UI + noVNC 预览</span>
+│  └─ api/          <span class="c"># NestJS 12 — 编排 / SSE / webhooks</span>
+├─ packages/
+│  ├─ core/         <span class="c"># sandbox 客户端 + computer/browser 工具 + agent loop</span>
+│  ├─ types/        <span class="c"># 共享 Zod schema(web/api/core 的契约)</span>
+│  ├─ db/           <span class="c"># 数据库 schema + client</span>
+│  └─ config/       <span class="c"># 共享 tsconfig / oxlint 配置</span>
+├─ turbo.json  ·  pnpm-workspace.yaml  ·  .changeset/</pre>
+      <ul>
+        <li>
+          <strong>CI(PR)</strong>:<code>pnpm turbo run lint check-types test build --affected</code>
+          + Prettier 检查,复用远程缓存。
+        </li>
+        <li>
+          <strong>Release</strong>:Changesets 自动开「Version Packages」PR;merge 后 bump 版本 +
+          changelog。
+        </li>
+        <li>
+          <strong>Deploy</strong>:Railway 原生 git 集成,push main 按 watch paths 只重部署受影响
+          service;或让 CI 用 <code>railway up</code> 显式驱动。
+        </li>
+        <li>
+          <strong>约定</strong>:根 <code>AGENTS.md</code>(2026 跨工具标准),<code>CODEOWNERS</code>
+          覆盖 <code>packages/*</code>,内部依赖用 <code>workspace:*</code>。
+        </li>
+      </ul>
+      <div class="call crit">
+        <p class="tag">安全红线</p>
+        <p>
+          控制面暴露 sandbox 编排与 webhook。<strong>每条 API 路由从第一天起就鉴权</strong>,webhook
+          先验签再干活。绝不上线无鉴权的控制面。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. RISKS -->
+  <section id="risks">
+    <div class="wrap col">
+      <h2><span class="num">07</span>风险与未验证项</h2>
+      <p class="sub">如实标注,不掩盖。</p>
+      <div class="call crit">
+        <p class="tag">未验证 · 脚手架</p>
+        <p>
+          上一轮搭 monorepo 骨架时,工具通道一度返回异常(<code>Write</code>
+          结果被追加杂讯、幽灵临时文件、<code>Bash</code> 空输出)。已写入的根配置与
+          <code>types/config</code> 包<strong>极可能落盘但未逐一复核内容</strong>;<code
+            >packages/types/src/*</code
+          >
+          与整树 <code>pnpm install / build</code> 尚未验证。下一轮通道正常时需 <code>find</code> +
+          安装构建一次性确认。
+        </p>
+      </div>
+      <ul>
+        <li>
+          <strong>成本模型未量化</strong>:每活跃 bot = 一台云桌面。需实测 PPIO 单 sandbox 计价 +
+          idle 暂停/恢复延迟,才能定价与容量规划。
+        </li>
+        <li>
+          <strong>第三方版本漂移</strong>:AI SDK v6 已于 2025-12 announced;Railway config-as-code
+          2026-12-01 弃用。落地前对官方文档二次确认。
+        </li>
+        <li>
+          <strong>反自动化对抗</strong
+          >:滑块/行为验证码是持续对抗,拟人拖拽不保证通过率;高价值站点优先设计 human-handoff 兜底。
+        </li>
+        <li>
+          <strong>私有协议不可见</strong>:PPIO 宿主网关(如
+          <code>1340</code> 端口)的报文格式、鉴权、内部任务队列是产品内部实现,SDK
+          之下的细节看不到,不臆造。
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- SOURCES -->
+  <section id="sources">
+    <div class="wrap col">
+      <h2><span class="num">08</span>来源</h2>
+      <p class="sub">官方文档优先于第三方博客。</p>
+      <h3>编排层</h3>
+      <div class="src-grid">
+        <a href="https://sdk.vercel.ai/docs/agents/loop-control">AI SDK · Loop Control</a>
+        <a href="https://sdk.vercel.ai/docs/guides/computer-use">AI SDK · Computer Use 指南</a>
+        <a href="https://github.com/vercel-labs/ai-sdk-computer-use"
+          >vercel-labs/ai-sdk-computer-use</a
+        >
+        <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool"
+          >Claude computer-use tool</a
+        >
+        <a href="https://developers.openai.com/codex/sdk/">OpenAI Codex SDK</a>
+        <a href="https://github.com/iFurySt/open-codex-computer-use"
+          >iFurySt/open-codex-computer-use</a
+        >
+      </div>
+      <h3>构建 / 部署</h3>
+      <div class="src-grid">
+        <a href="https://docs.railway.com/guides/monorepo">Railway · Monorepo</a>
+        <a href="https://docs.railway.com/reference/private-networking">Railway · 私有网络</a>
+        <a href="https://oxc.rs/blog/2026-07-22-type-aware-linting-stable.html"
+          >oxc · 类型感知 lint stable</a
+        >
+        <a href="https://turbo.build/repo/docs/core-concepts/caching">Turborepo · 缓存</a>
+        <a href="https://docs.nestjs.com">NestJS 文档</a>
+        <a href="https://nextjs.org/docs/app/guides/streaming">Next.js · Streaming</a>
+      </div>
+      <h3>Grok / PPIO</h3>
+      <div class="src-grid">
+        <a href="https://docs.x.ai/developers/models">xAI · 模型与定价</a>
+        <a href="https://ppio.com/docs/sandbox/overview">PPIO Sandbox 文档</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      i-bot 架构蓝图 · 调研综合 2026-09-11 · PPIO Sandbox 结论为源码级已验证,其余以官方文档为准 ·
+      本页为内部工作产物
+    </div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    var btn = document.getElementById("themeBtn");
+    var root = document.documentElement;
+    function current() {
+      var set = root.getAttribute("data-theme");
+      if (set) return set;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    btn.addEventListener("click", function () {
+      var next = current() === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      btn.textContent = next === "dark" ? "☾ 深色" : "☀ 浅色";
+    });
+  })();
+</script>

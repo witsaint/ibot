@@ -16,12 +16,19 @@ describe("DESKTOP manifest", () => {
     expect(TEMPLATES[DESKTOP.key]).toBe(DESKTOP);
   });
 
-  it("exposes the four boot-service ports the getHost URLs depend on", () => {
-    expect(DESKTOP.ports).toEqual({ cdp: 9222, vnc: 5900, novnc: 6080, envd: 49983 });
+  it("exposes the boot-service ports the getHost URLs depend on (incl. the CDP proxy)", () => {
+    expect(DESKTOP.ports).toEqual({
+      cdp: 9222,
+      cdpProxy: 9223,
+      vnc: 5900,
+      novnc: 6080,
+      envd: 49983,
+    });
   });
 
-  it("has no templateId until first build (runtime falls back to name)", () => {
+  it("has no custom templateId (gateway blocks builds) and provisions on a base image", () => {
     expect(DESKTOP.templateId).toBeNull();
     expect(DESKTOP.name).toBe("ibot-desktop");
+    expect(DESKTOP.baseImage).toBe("e2b/base");
   });
 });

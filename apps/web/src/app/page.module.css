@@ -1,0 +1,170 @@
+.landing {
+  --bg: var(--landing-bg);
+  --bg-subtle: var(--landing-bg);
+  --surface: var(--landing-surface);
+  --surface-hover: var(--landing-surface-hover);
+  --border: var(--landing-border);
+  --border-strong: var(--landing-border-strong);
+  --ink: var(--landing-ink);
+  --ink-secondary: var(--landing-ink-secondary);
+  --ink-muted: var(--landing-ink-muted);
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 29vw, 480px);
+  background: var(--landing-bg);
+  color: var(--landing-ink);
+}
+
+.sceneColumn {
+  position: relative;
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--landing-bg) 98.5%, var(--landing-ink) 1.5%);
+}
+
+.groundArtwork {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  pointer-events: none;
+}
+
+.sceneColumn::after {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  content: "";
+  background: var(--landing-divider);
+  box-shadow:
+    -8px 0 24px var(--landing-divider-shadow),
+    8px 0 32px var(--landing-divider-shadow);
+}
+
+.authColumn {
+  position: relative;
+  z-index: 11;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: clamp(32px, 5vw, 64px) clamp(24px, 3.2vw, 48px);
+}
+
+.authContent {
+  width: 100%;
+  max-width: 380px;
+}
+
+.authCard {
+  padding: 22px;
+  background: color-mix(in srgb, var(--landing-surface) 96%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.brandImage,
+.brandFallback {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-lg);
+}
+
+.brandImage {
+  display: block;
+  object-fit: cover;
+}
+
+.brandFallback {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.brandFallbackMark {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.brandName {
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+
+.modeSwitch {
+  margin: 16px 0 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.modeButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.loading {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--landing-bg);
+}
+
+@media (max-width: 760px) {
+  .landing {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(230px, 38svh) auto;
+  }
+
+  .sceneColumn {
+    min-height: 0;
+  }
+
+  .sceneColumn::after {
+    top: auto;
+    left: 0;
+    width: auto;
+    height: 1px;
+    box-shadow:
+      0 -8px 24px var(--landing-divider-shadow),
+      0 8px 32px var(--landing-divider-shadow);
+  }
+
+  .authColumn {
+    min-height: 62svh;
+    padding: 36px 24px 48px;
+  }
+}

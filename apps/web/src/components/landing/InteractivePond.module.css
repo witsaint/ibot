@@ -1,0 +1,23 @@
+.pond {
+  position: absolute;
+  z-index: 2;
+  left: 10.19%;
+  bottom: 4.14cqw;
+  width: 35.99%;
+  height: 4.46cqw;
+  clip-path: url(#landing-pond-clip);
+  touch-action: pan-y;
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.definitions {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}

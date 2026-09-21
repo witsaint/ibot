@@ -18,13 +18,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.node.json",
     "dev": "tsc -p tsconfig.node.json --watch",
-    "check-types": "tsc --noEmit -p tsconfig.node.json",
-    "template:build": "./desktop/build.sh",
+    "check-types": "tsc --noEmit -p tsconfig.node.json && tsc -p tsconfig.scripts.json",
+    "template:build": "tsx scripts/build-template.ts",
     "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "devDependencies": {
     "@i-bot/config": "workspace:*",
+    "@types/node": "^24.13.4",
+    "ppio-sandbox": "^2.1.1",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.3",
     "vitest": "^5.0.0"
   }

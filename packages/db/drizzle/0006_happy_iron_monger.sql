@@ -1,0 +1,1 @@
+ALTER TABLE "bots" ADD COLUMN "sandbox_public" boolean;

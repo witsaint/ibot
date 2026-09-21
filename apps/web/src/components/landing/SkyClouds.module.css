@@ -1,0 +1,122 @@
+.sky {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cloud {
+  position: absolute;
+  display: block;
+  height: auto;
+  transform-origin: center;
+}
+
+.cloudOne {
+  z-index: 2;
+  top: 3%;
+  left: 4%;
+  width: 16%;
+  opacity: 0.82;
+  transform: rotate(-2deg);
+}
+
+.cloudDark {
+  z-index: 1;
+  top: 4%;
+  left: 29%;
+  width: 23%;
+  opacity: 0.96;
+  transform: rotate(-0.5deg);
+}
+
+.cloudFive {
+  z-index: 2;
+  top: 2%;
+  right: 4%;
+  width: 19%;
+  opacity: 0.74;
+  transform: rotate(2deg);
+}
+
+.cloudTwo {
+  z-index: 2;
+  top: 13%;
+  left: 43%;
+  width: 21%;
+  opacity: 0.8;
+  transform: rotate(1deg);
+}
+
+.cloudTwoOne {
+  z-index: 2;
+  top: 16%;
+  left: 15%;
+  width: 20%;
+  opacity: 0.72;
+  transform: rotate(-1deg);
+}
+
+.cloudFour {
+  z-index: 2;
+  top: 17%;
+  right: 14%;
+  width: 19%;
+  opacity: 0.66;
+  transform: rotate(1.5deg);
+}
+
+.cloudOneRight {
+  z-index: 3;
+  top: 5%;
+  right: 24%;
+  width: 16%;
+  opacity: 0.86;
+  transform: rotate(1deg);
+}
+
+@media (max-width: 760px) {
+  .cloudOne {
+    top: 3%;
+    left: 2%;
+    width: 21%;
+  }
+
+  .cloudDark {
+    top: 4%;
+    left: 27%;
+    width: 25%;
+  }
+
+  .cloudFive {
+    top: 2%;
+    right: 2%;
+    width: 21%;
+  }
+
+  .cloudTwo {
+    top: 19%;
+    left: 43%;
+    width: 23%;
+  }
+
+  .cloudTwoOne {
+    top: 22%;
+    left: 12%;
+    width: 22%;
+  }
+
+  .cloudFour {
+    top: 23%;
+    right: 10%;
+    width: 21%;
+  }
+
+  .cloudOneRight {
+    top: 7%;
+    right: 23%;
+    width: 21%;
+  }
+}

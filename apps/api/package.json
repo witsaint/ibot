@@ -1,0 +1,39 @@
+{
+  "name": "@i-bot/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.node.json",
+    "check-types": "tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run --passWithNoTests",
+    "verify": "tsx --env-file=../../.env scripts/verify-api.ts",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@a2ui/web_core": "^0.11.0",
+    "@ai-sdk/anthropic": "^4.0.53",
+    "@hono/node-server": "^2.1.1",
+    "@i-bot/auth": "workspace:*",
+    "@i-bot/core": "workspace:*",
+    "@i-bot/db": "workspace:*",
+    "@i-bot/logger": "workspace:*",
+    "@i-bot/storage": "workspace:*",
+    "@i-bot/types": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ai": "^7.0.97",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.7",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@i-bot/config": "workspace:*",
+    "@types/node": "^24.13.4",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.0"
+  }
+}

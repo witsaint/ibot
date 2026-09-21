@@ -1,0 +1,29 @@
+.cloud {
+  --cloud-light-tint: #abc7ec;
+  aspect-ratio: 628 / 390;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cloud:focus-visible {
+  outline: 1px dashed var(--landing-ink-muted);
+  outline-offset: 4px;
+  border-radius: 50%;
+}
+.artwork {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+.effect {
+  position: absolute;
+  left: -15%;
+  top: -15%;
+  width: 130%;
+  height: 130%;
+  pointer-events: none;
+}

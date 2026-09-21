@@ -23,6 +23,25 @@ minimumReleaseAgeExclude:
   - "@better-auth/prisma-adapter@1.7.4"
   - "@better-auth/telemetry@1.7.4"
   - better-auth@1.7.4
+  - "@ai-sdk/anthropic@4.0.53"
+  - "@ai-sdk/provider-utils@5.0.40"
+  - "@ai-sdk/provider@4.0.14"
+  - "@ai-sdk/gateway@4.0.80"
+  - "@ai-sdk/mcp@2.0.49"
+  - "@ai-sdk/react@4.0.102"
+  - "@next/env@16.3.5"
+  - "@next/swc-darwin-arm64@16.3.5"
+  - "@next/swc-darwin-x64@16.3.5"
+  - "@next/swc-linux-arm64-gnu@16.3.5"
+  - "@next/swc-linux-arm64-musl@16.3.5"
+  - "@next/swc-linux-x64-gnu@16.3.5"
+  - "@next/swc-linux-x64-musl@16.3.5"
+  - "@next/swc-win32-arm64-msvc@16.3.5"
+  - "@next/swc-win32-x64-msvc@16.3.5"
+  - ai@7.0.99
+  - next@16.3.5
+patchedDependencies:
+  ppio-sandbox@2.1.1: patches/ppio-sandbox@2.1.1.patch
 
 # Pin common heavy deps here later to keep versions aligned across the workspace.
 # catalog:

@@ -9,5 +9,11 @@
   "rules": {
     "no-console": "off"
   },
-  "ignorePatterns": ["**/dist/**", "**/.next/**", "**/node_modules/**", "**/*.gen.ts"]
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.next/**",
+    "**/node_modules/**",
+    "**/*.gen.ts",
+    "**/next-env.d.ts"
+  ]
 }

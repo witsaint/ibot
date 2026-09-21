@@ -41,7 +41,8 @@ chat UI + live desktop preview.
 - `packages/core` — `SandboxProvider` abstraction (AIProxy/PPIO impl), computer-use +
   browser-use tools, Mastra agents/tools.
 - `packages/types` — shared Zod schemas + TS types (single source of truth).
-- `packages/db` — database schema + client (users, bots, sandboxes, skills, bot_mcp_servers).
+- `packages/db` — database schema + client (users, bots, sandboxes, skills, bot_mcp_servers,
+  conversations, messages, attachments). Drizzle owns **every** table; Mastra never creates any.
 - `packages/config` — shared tsconfig, oxlint config, design tokens.
 
 Internal deps use `workspace:*` and the `@i-bot/*` scope.
@@ -64,6 +65,28 @@ Always run `pnpm lint && pnpm check-types` before considering a change done.
 - Turborepo `tasks` key (not `pipeline`). Declare env vars per task for cache correctness.
 - Add a **changeset** (`pnpm changeset`) for any change to `packages/*`.
 - Zod schemas in `@i-bot/types` are the contract between web, api, and core. Change them there, not inline.
+
+## Golden rules for persisted content
+
+Principles for how conversation content (interleaved text/image/audio/video) is stored and
+served. These are invariants — hold them across features; the concrete contract lives in
+`@i-bot/types` and the schema in `@i-bot/db`.
+
+- **One canonical representation.** Content has a single stored shape that serves rendering,
+  persistence, and model input alike. Never fork a second format for one consumer — adapt at the
+  edge instead. Ordering within a message carries meaning; preserve it.
+- **We own our persistence.** The schema and its migrations are ours. A framework may operate on
+  the data, but must not own the tables or manage their migrations — one source of truth for
+  structure keeps foreign keys and isolation intact.
+- **Blobs live in object storage; records hold references.** Large binaries go to R2; structured
+  rows store a pointer (key + type + size), never the bytes inline.
+- **Store lossless; degrade only at the boundary.** Persist content in full. Any narrowing for a
+  specific model (dropping or transcoding what it can't ingest) happens once, at the model-call
+  boundary — never on the way into storage. What one provider rejects today, another accepts
+  tomorrow; the store must not encode that limit.
+- **Authorization follows the ownership chain.** Every read and write of tenant data is scoped
+  down the ownership hierarchy to its owner — no query trusts an id it didn't resolve through that
+  chain. Same discipline as the sandbox layer.
 
 ## Golden rules for the sandbox layer
 

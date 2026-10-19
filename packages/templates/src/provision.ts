@@ -50,16 +50,21 @@
  *   spoofed one does not.
  * - WARP egress (public channel): `cloudflare-warp` is installed from Cloudflare's apt repo and run
  *   in PROXY mode — a SOCKS5 listener on 127.0.0.1:${WARP_PORT} that only carries traffic explicitly
- *   pointed at it. Chrome gets `--proxy-server=socks5://…` (the `socks5://` scheme makes Chrome do
- *   DNS through the proxy too, so hostnames resolve on the clean side). Nothing else on the box is
- *   proxied: apt, curl, the agent's `run_command`, envd (the SDK channel) and noVNC all keep the
- *   box's own route, so the management plane cannot be severed by this. Trade-offs, measured: the
- *   free WARP node is `loc=CN`; google.com / t.co are unreachable through it (Google login flows
- *   that bounce via google.com main domain may stall; GA/ads pixels fail harmlessly); corporate
- *   split-tunnel VPNs (Feilian) are mutually exclusive with it in the same Chrome. Free WARP has no
- *   SLA — `warp-svc` is pgrep-guarded and re-provision reconnects it.
+ *   pointed at it. Chrome is steered by a PAC (`--proxy-pac-url=data:…`, see `proxy-pac.ts`):
+ *   domestic hosts (`.cn` + a whitelist of CN services on other TLDs) go DIRECT on the box's own
+ *   domestic route, everything else goes `SOCKS5 127.0.0.1:${WARP_PORT}` with a `DIRECT` fallback
+ *   if WARP is down. SOCKS5 in a PAC still means Chrome resolves those hostnames THROUGH the proxy,
+ *   so overseas names never hit the box's resolver. Nothing else on the box is proxied: apt, curl,
+ *   the agent's `run_command`, envd (the SDK channel) and noVNC all keep the box's own route, so
+ *   the management plane cannot be severed by this. Trade-offs, measured: the free WARP node is
+ *   `loc=CN`; google.com / t.co are unreachable through it (Google login flows that bounce via
+ *   google.com main domain may stall; GA/ads pixels fail harmlessly); corporate split-tunnel VPNs
+ *   (Feilian) are mutually exclusive with it in the same Chrome. Free WARP has no SLA — `warp-svc`
+ *   is pgrep-guarded and re-provision reconnects it.
  */
 import { DESKTOP } from "./manifest.js";
+import { MCP_BRIDGE_JS, MCP_BRIDGE_PATH } from "./mcp-bridge.js";
+import { buildProxyPac, proxyPacDataUrl } from "./proxy-pac.js";
 
 /** Fastest reachable Debian mirror from the gateway's CN infra (probe: USTC 0.34s). */
 export const APT_MIRROR = "https://mirrors.ustc.edu.cn";
@@ -165,40 +170,295 @@ export const WARP_PORT = 40000;
 export const WARP_APT_REPO = "https://pkg.cloudflareclient.com/";
 export const WARP_APT_KEY_URL = "https://pkg.cloudflareclient.com/pubkey.gpg";
 
+/** Where the keeper publishes the egress verdict, so the platform can READ state without running a
+ * command that itself needs a healthy box. One small JSON file, rewritten atomically. */
+export const EGRESS_STATE_PATH = "/opt/ibot-egress.json";
+
 /**
- * Bring WARP up in proxy mode, idempotently. Written to /opt/warp-up.sh so the multi-command
- * sequence is one guarded step (envd runs each step in its own shell).
+ * `warp-verify.sh` — the ONE honest readiness signal, factored out because three other scripts need
+ * exactly it and any divergence between them is a bug.
  *
- * - `warp-svc` is the daemon (no systemd in the box → nohup it; pgrep-guarded on re-provision).
- * - `registration new` is a no-op error if already registered (`|| true`); the registration is
- *   the free consumer tier, no account/key — nothing tenant-specific ever leaves the box.
- * - `mode proxy` BEFORE `connect`: in proxy mode WARP never touches routes or resolv.conf, so the
- *   PPIO edge relay (noVNC + envd) stays reachable. Full-tunnel mode would sever the management
- *   plane — never switch this to `warp` mode.
- * - `proxy port` pins the SOCKS5 port to WARP_PORT so Chrome's flag always matches.
- * - Waits (bounded) for `warp=on` THROUGH the proxy — the only proof the tunnel is actually up.
- *   Exit 0 either way: a slow WARP must not fail provisioning (Chrome still launches; the
- *   readiness probe below reports the real state and re-provision reconnects).
+ * Nothing else counts as "up". Measured on a live box 2026-09-23, each of these lies:
+ *   - `warp-cli connect` printing **`Success`** while status stays `Disconnected`. It means "command
+ *     accepted", not "tunnel established".
+ *   - `warp-cli status` saying `Connected` — it reports the daemon's intent, not a working path.
+ *   - `pgrep warp-svc` — the daemon happily runs with the tunnel down (that was the exact state of
+ *     the box for a full day: warp-svc alive, SOCKS5 port not even listening).
+ * Only bytes coming back THROUGH the SOCKS5 socket prove it, so this asks Cloudflare who it thinks
+ * we are and requires `warp=on`. Prints `ip=… warp=on` on success for the state file.
+ */
+export const WARP_VERIFY_SH = String.raw`#!/bin/sh
+# warp-verify.sh [port] — exit 0 only if traffic really egresses through WARP.
+PORT="${"${1:-40000}"}"
+OUT=$(curl -s --max-time 8 --proxy "socks5h://127.0.0.1:$PORT" \
+  https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)
+echo "$OUT" | grep -q '^warp=on' || exit 1
+echo "$OUT" | grep -E '^(ip|warp|loc)=' | tr '\n' ' '
+exit 0
+`;
+
+/**
+ * `warp-up.sh` — bring WARP up, or bring it BACK, by escalation.
+ *
+ * The old version issued `connect` once and exited 0 regardless. That is why a box could sit for a
+ * day with the browser silently egressing from the datacenter IP: nothing re-checked, and the one
+ * command it did run is the one that reports success without doing anything.
+ *
+ * So this is a LADDER, not a retry. Repeating a command that just failed is not a recovery strategy —
+ * measured: `connect` failed, and `disconnect` + `connect` failed identically, both printing
+ * `Success`. What actually rebuilt the tunnel was **setting the tunnel protocol**, which forces WARP
+ * to tear down and re-establish. Each rung does something strictly more drastic than the last, and
+ * every rung is followed by a real `warp-verify`, so the script can only claim success when traffic
+ * came back:
+ *
+ *   1. verify           — already up, nothing to do (the common case on re-provision)
+ *   2. ensure+connect   — daemon up, mode/port pinned, plain connect
+ *   3. reconnect        — disconnect, then connect
+ *   4. protocol MASQUE  — forces a rebuild; also the protocol that WORKS here (see below)
+ *   5. protocol WireGuard — the other one, for a network where UDP/MASQUE is filtered
+ *   6. restart warp-svc — kill the daemon, relaunch, rerun rungs 2-4
+ *   7. re-register      — throw away the device registration and get a new one (last resort:
+ *                         a revoked/rate-limited registration can't be fixed any other way)
+ *
+ * Protocol is ALTERNATED rather than pinned on purpose. Measured on the same box minutes apart:
+ * WireGuard = totally dead (0 B/s, SOCKS5 not even listening), MASQUE = healthy (155 KB/s, a 1.3 MB
+ * page in 2.2s). Which one works is a property of the network path, not of our config, so the ladder
+ * discovers it instead of us guessing — and a box whose MASQUE gets filtered tomorrow still recovers.
+ *
+ * `mode proxy` is re-asserted on every rung: in proxy mode WARP never touches routes or resolv.conf,
+ * so the PPIO edge relay (noVNC + envd) stays reachable. Never `mode warp` — that severs the
+ * management plane. Registration is the free consumer tier: no account, no key, nothing
+ * tenant-specific leaves the box.
+ *
+ * Exit 0 = verified up. Exit 1 = every rung failed, and the caller must treat the browser's egress as
+ * DIRTY rather than assume it worked.
  */
 export const WARP_UP_SH = String.raw`#!/bin/sh
+# warp-up.sh [port] — escalate until traffic really egresses through WARP. Exit 0 only when verified.
 PORT="${"${1:-40000}"}"
-if ! pgrep -x warp-svc >/dev/null 2>&1; then
-  nohup warp-svc >/tmp/warp-svc.log 2>&1 &
-  sleep 3
-fi
-warp-cli --accept-tos registration new >/dev/null 2>&1 || true
-warp-cli --accept-tos mode proxy >/dev/null 2>&1 || true
-warp-cli --accept-tos proxy port "$PORT" >/dev/null 2>&1 || true
-warp-cli --accept-tos connect >/dev/null 2>&1 || true
-i=0
-while [ $i -lt 20 ]; do
-  if curl -s --max-time 4 --proxy "socks5h://127.0.0.1:$PORT" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q '^warp=on'; then
-    echo "[warp-up] warp=on via socks5 :$PORT"; exit 0
+V="sh /opt/warp-verify.sh $PORT"
+W="warp-cli --accept-tos"
+say() { echo "[warp-up] $(date -u +%H:%M:%S) $1"; }
+
+# Every rung ends here. warp-cli reporting Success proves nothing, so the tunnel has to answer.
+# Polls because a rebuild takes a few seconds; bounded so a dead rung doesn't eat the whole budget.
+try() {
+  i=0
+  while [ $i -lt "$2" ]; do
+    if OUT=$($V 2>/dev/null); then say "UP via $1 ($OUT)"; echo "$1" > /tmp/warp-rung; exit 0; fi
+    i=$((i+1)); sleep 1
+  done
+  say "rung failed: $1"
+}
+
+ensure_daemon() {
+  if ! pgrep -x warp-svc >/dev/null 2>&1; then
+    say "starting warp-svc"
+    setsid warp-svc < /dev/null > /tmp/warp-svc.log 2>&1 &
+    sleep 3
   fi
-  i=$((i+1)); sleep 1
+  $W registration new >/dev/null 2>&1 || true   # no-op error when already registered
+  $W mode proxy >/dev/null 2>&1 || true         # NEVER 'warp' mode: would sever envd/noVNC
+  $W proxy port "$PORT" >/dev/null 2>&1 || true # keep the SOCKS port and Chrome's PAC in step
+}
+
+# 1. already up?
+try already-up 1
+
+# 2. daemon + plain connect
+ensure_daemon
+$W connect >/dev/null 2>&1 || true
+try connect 10
+
+# 3. reconnect
+$W disconnect >/dev/null 2>&1 || true
+sleep 2
+$W connect >/dev/null 2>&1 || true
+try reconnect 10
+
+# 4+5. protocol swap — the rung that actually recovered a stuck tunnel. Order puts MASQUE first
+# because it is the one measured working on this infra; WireGuard is the fallback for a path that
+# filters it.
+for proto in MASQUE WireGuard; do
+  say "switching tunnel protocol to $proto"
+  $W tunnel protocol set "$proto" >/dev/null 2>&1 || true
+  sleep 2
+  $W connect >/dev/null 2>&1 || true
+  try "protocol-$proto" 12
 done
-echo "[warp-up] WARNING: warp not confirmed on after 20s (status: $(warp-cli --accept-tos status 2>&1 | head -1))"
-exit 0
+
+# 6. the daemon itself is wedged
+say "restarting warp-svc"
+pkill -x warp-svc >/dev/null 2>&1 || true
+sleep 2
+ensure_daemon
+$W connect >/dev/null 2>&1 || true
+try svc-restart 12
+
+# 7. last resort: the registration is revoked/rate-limited and nothing else can fix it
+say "re-registering device"
+$W registration delete >/dev/null 2>&1 || true
+sleep 1
+$W registration new >/dev/null 2>&1 || true
+$W mode proxy >/dev/null 2>&1 || true
+$W proxy port "$PORT" >/dev/null 2>&1 || true
+$W connect >/dev/null 2>&1 || true
+try re-register 15
+
+say "EXHAUSTED: browser egress is NOT clean (status: $($W status 2>&1 | head -1))"
+exit 1
+`;
+
+/**
+ * `warp-keeper.sh` — the answer to "能不能重试/重连". A provision-time ladder fixes a box at connect;
+ * it does nothing about a tunnel that dies an hour into a session, which is exactly how this failed.
+ * So a supervisor loop owns the invariant continuously: verify every ${WARP_KEEPER_INTERVAL_S}s and
+ * walk the ladder the moment it stops holding.
+ *
+ * It also PUBLISHES the verdict to ${EGRESS_STATE_PATH} on every cycle, which is what makes the thing
+ * deliverable rather than merely self-healing: the platform can read whether this box's browser
+ * egress is clean right now, without shelling in, and a CF-gated task can refuse to start on a dirty
+ * IP instead of failing mysteriously halfway.
+ *
+ * Deliberately small: no systemd in the box, so it is a `setsid` loop, pgrep-guarded on re-provision
+ * (which runs on every connect, so it comes back for free after the infra's pause/resume). Backoff is
+ * bounded — a persistently broken tunnel must not spin the ladder (rung 7 deletes a registration) nor
+ * burn the 1-CPU box, so consecutive failures back off to ${WARP_KEEPER_MAX_BACKOFF_S}s.
+ */
+export const WARP_KEEPER_INTERVAL_S = 30;
+export const WARP_KEEPER_MAX_BACKOFF_S = 300;
+export const WARP_KEEPER_SH = String.raw`#!/bin/sh
+# warp-keeper.sh [port] — hold "browser egress is clean" as an invariant, and publish the verdict.
+PORT="${"${1:-40000}"}"
+STATE=${EGRESS_STATE_PATH}
+LOG=/tmp/warp-keeper.log
+INTERVAL=${String(WARP_KEEPER_INTERVAL_S)}
+MAX_BACKOFF=${String(WARP_KEEPER_MAX_BACKOFF_S)}
+fails=0
+
+# Written whole then moved: a reader must never see half a JSON document.
+publish() {
+  tmp="$STATE.tmp"
+  printf '{"ok":%s,"detail":%s,"protocol":%s,"rung":%s,"checkedAt":"%s","failures":%s}\n' \
+    "$1" "$2" "$3" "$4" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$fails" > "$tmp" 2>/dev/null
+  mv "$tmp" "$STATE" 2>/dev/null
+}
+# JSON-quote a shell value: drop quotes/backslashes (would break the document), flatten newlines, cap
+# the length, and TRIM — warp-verify's output ends in a space and the settings grep in a newline, which
+# would otherwise land in the file as "MASQUE " and fail any caller comparing protocol === "MASQUE".
+jstr() {
+  v=$(echo "$1" | tr -d '"\\' | tr '\n' ' ' | cut -c1-200 | sed 's/^ *//; s/ *$//')
+  printf '"%s"' "$v"
+}
+
+while :; do
+  # Installation runs independently from desktop provisioning. Keep the supervisor alive while
+  # the package is absent, and retry verification as soon as it appears on disk.
+  if ! command -v warp-cli >/dev/null 2>&1; then
+    publish false '"WARP client is not installed; waiting for installation"' '""' '""'
+    sleep "$INTERVAL"
+    continue
+  fi
+  if OUT=$(sh /opt/warp-verify.sh "$PORT" 2>/dev/null); then
+    fails=0
+    publish true "$(jstr "$OUT")" \
+      "$(jstr "$(warp-cli --accept-tos settings 2>/dev/null | sed -n 's/.*tunnel protocol: *//p' | head -1)")" \
+      "$(jstr "$(cat /tmp/warp-rung 2>/dev/null)")"
+    sleep "$INTERVAL"
+    continue
+  fi
+
+  fails=$((fails+1))
+  echo "[keeper] $(date -u +%H:%M:%S) egress NOT clean (failure #$fails); running the ladder" >> "$LOG"
+  publish false "$(jstr "verify failed; recovering (attempt $fails)")" '""' '""'
+  sh /opt/warp-up.sh "$PORT" >> "$LOG" 2>&1
+  if OUT=$(sh /opt/warp-verify.sh "$PORT" 2>/dev/null); then
+    echo "[keeper] $(date -u +%H:%M:%S) recovered: $OUT" >> "$LOG"
+    fails=0
+    publish true "$(jstr "$OUT")" '""' "$(jstr "$(cat /tmp/warp-rung 2>/dev/null)")"
+    sleep "$INTERVAL"
+    continue
+  fi
+
+  # Still broken. Back off so the ladder isn't hammered (rung 7 re-registers) and the box keeps its CPU.
+  back=$((INTERVAL * fails))
+  [ "$back" -gt "$MAX_BACKOFF" ] && back=$MAX_BACKOFF
+  echo "[keeper] $(date -u +%H:%M:%S) still broken; backing off ${"${back}"}s" >> "$LOG"
+  publish false "$(jstr "recovery failed; retrying in ${"${back}"}s")" '""' '""'
+  # keep the log bounded — this process is meant to run for the life of the box
+  [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 262144 ] && tail -c 65536 "$LOG" > "$LOG.t" && mv "$LOG.t" "$LOG"
+  sleep "$back"
+done
+`;
+
+/**
+ * The human-session recorder, written to /opt/ibot-recorder.sh and driven on demand by the API
+ * (POST …/sandbox/recording start|stop) while a person holds control of the desktop. It is NOT
+ * started at provision time — nothing runs until someone presses Record.
+ *
+ * Why polling: the box has no xinput/ffmpeg, and adding an X input tap would mean another daemon
+ * with root on the display. This samples what already exists — pointer position + active window
+ * (xdotool) and a coarse screen-change hash (scrot thumbnail) — and writes a full-res PNG frame plus
+ * one JSON event line only when something changed, with a keyframe every 5s. A still desktop costs
+ * ~0.3 CPU-s/tick; a busy one caps at ~2 frames/s. The frames + events are what the distiller reads.
+ */
+export const RECORDER_SH = String.raw`#!/bin/bash
+# ibot-recorder: sample the desktop while a human drives it.
+#   ibot-recorder.sh start|stop|status DIR
+# A polling sampler: every tick read pointer + active window (xdotool) and a screen-change hash
+# (scrot thumbnail → coarse md5). Write one full-res PNG frame + one JSON event line when something
+# changed (pointer moved >8px, window title changed, screen content changed), and a keyframe every
+# 5s regardless so a long still stretch (reading, waiting on a page) is still represented. A still
+# desktop costs ~0.3 CPU-s per tick; a busy one yields ≤2 frames/s.
+export DISPLAY=:0
+CMD="$1"; DIR="$2"; [ -n "$DIR" ] || DIR=/tmp/ibot-rec; PID="$DIR/recorder.pid"
+case "$CMD" in
+  start)
+    # begin from a clean keyboard: a modifier left held on the X server (seen live: Control_L stuck
+    # after a mis-mapped Cmd release) turns every typed letter into a shortcut — useless to record
+    xdotool keyup Control_L Control_R Shift_L Shift_R Alt_L Alt_R Super_L Super_R Meta_L 2>/dev/null
+    mkdir -p "$DIR/frames"; : > "$DIR/events.jsonl"; date +%s%3N > "$DIR/started_at"; rm -f "$DIR/stopped_at"
+    nohup bash "$0" _loop "$DIR" >"$DIR/recorder.log" 2>&1 &
+    echo $! > "$PID"; echo "started pid $!" ;;
+  stop)
+    [ -f "$PID" ] && kill "$(cat "$PID")" 2>/dev/null; rm -f "$PID"
+    date +%s%3N > "$DIR/stopped_at"
+    echo "stopped frames=$(ls "$DIR/frames" 2>/dev/null | wc -l | tr -d ' ') events=$(wc -l < "$DIR/events.jsonl" | tr -d ' ')" ;;
+  status)
+    if [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
+      echo "recording frames=$(ls "$DIR/frames" 2>/dev/null | wc -l | tr -d ' ')"
+    else echo "idle"; fi ;;
+  _loop)
+    prev_x=-999; prev_y=-999; prev_win=""; prev_hash=""; n=0; last_key=0; t0=$(cat "$DIR/started_at")
+    while :; do
+      X=0; Y=0; eval "$(xdotool getmouselocation --shell 2>/dev/null)"
+      win="$(xdotool getactivewindow getwindowname 2>/dev/null | head -c 120)"
+      scrot -o -q 30 /tmp/ibot-rec-thumb.png 2>/dev/null
+      # -W ignore: Pillow's deprecation warning would otherwise land in $hash and defeat the compare
+      hash="$(python3 -W ignore - <<'PY' 2>/dev/null
+from PIL import Image; import hashlib
+im=Image.open('/tmp/ibot-rec-thumb.png').convert('L').resize((48,30))
+print(hashlib.md5(bytes(v//24 for v in im.getdata())).hexdigest()[:10])
+PY
+)"
+      now=$(( $(date +%s%3N) - t0 ))
+      dx=$(( X - prev_x )); dy=$(( Y - prev_y )); [ $dx -lt 0 ] && dx=$(( -dx )); [ $dy -lt 0 ] && dy=$(( -dy ))
+      moved=0; { [ $dx -gt 8 ] || [ $dy -gt 8 ]; } && moved=1
+      changed=0; [ "$hash" != "$prev_hash" ] && changed=1
+      wchg=0; [ "$win" != "$prev_win" ] && wchg=1
+      key=0; [ $(( now - last_key )) -ge 5000 ] && key=1
+      if [ $moved = 1 ] || [ $changed = 1 ] || [ $wchg = 1 ] || [ $key = 1 ]; then
+        n=$((n+1)); last_key=$now
+        f="$DIR/frames/$(printf '%04d' $n).png"; scrot -o -p "$f" 2>/dev/null
+        wjson="$(printf '%s' "$win" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
+        printf '{"n":%d,"t":%d,"x":%d,"y":%d,"win":%s,"screen":%d,"moved":%d,"winChanged":%d,"key":%d}\n' \
+          "$n" "$now" "$X" "$Y" "$wjson" "$changed" "$moved" "$wchg" "$key" >> "$DIR/events.jsonl"
+        prev_x=$X; prev_y=$Y; prev_win="$win"; prev_hash="$hash"
+      fi
+      sleep 0.5
+    done ;;
+  *) echo "usage: $0 start|stop|status [DIR]"; exit 2 ;;
+esac
 `;
 
 /**
@@ -325,7 +585,23 @@ export interface DesktopProvisionOptions {
    * proxied; the box's own route (apt, curl, run_command, envd, noVNC) is untouched either way.
    */
   warp?: boolean;
+  /**
+   * Extra hostnames (each matching itself + subdomains) the browser should reach DIRECT even with
+   * `warp` on — on top of the built-in CN list in `proxy-pac.ts`. For a bot whose target service is
+   * domestic but not yet in the whitelist. Ignored when `warp` is off (everything is direct then).
+   */
+  directDomains?: readonly string[];
+  /**
+   * Let Chrome fall back to the box's own (dirty) egress when WARP is unreachable. Default **false**:
+   * the browser fails loudly and the keeper heals it, rather than quietly showing pages fetched from
+   * a datacenter IP that Cloudflare pre-scores as a bot. See the fail-closed rationale in
+   * `proxy-pac.ts`. Only set true when a clean IP is opportunistic rather than the point.
+   */
+  egressFallbackDirect?: boolean;
 }
+
+/** Where the readable PAC copy lands in-box (debug only — Chrome reads the data: URL, not this). */
+export const PROXY_PAC_PATH = "/opt/ibot-proxy.pac";
 
 /**
  * Build the provisioning plan. Pure function of `opts` so the same recipe can be unit-tested for
@@ -337,9 +613,19 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
   // rather than failing immediately (same freshly-booted-box race the apt-update step rides out).
   const aptInstall = `DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends ${APT_PACKAGES.join(" ")}`;
 
-  // Chrome egress. `socks5://` (not `socks5h://` — Chrome's flag grammar) already means "resolve
-  // through the proxy" in Chrome, so hostnames never leak to the box's own resolver. Off = direct.
-  const proxyFlag = warp ? `--proxy-server=socks5://127.0.0.1:${WARP_PORT} ` : "";
+  // Chrome egress. With WARP on, a PAC splits per host: CN direct, the rest SOCKS5 via WARP (Chrome
+  // resolves SOCKS5-routed names through the proxy, so they never leak to the box's resolver) and by
+  // default NO direct fallback, so a down tunnel is an error instead of a silent dirty IP.
+  // Delivered as a data: URL — Chrome rejects file:// PAC URLs. Off = no flag = everything direct.
+  const pac = warp
+    ? buildProxyPac({
+        socksHost: "127.0.0.1",
+        socksPort: WARP_PORT,
+        fallbackDirect: opts.egressFallbackDirect ?? false,
+        ...(opts.directDomains ? { extraDirectDomains: opts.directDomains } : {}),
+      })
+    : null;
+  const proxyFlag = pac ? `--proxy-pac-url='${proxyPacDataUrl(pac)}' ` : "";
 
   const warpSteps: ProvisionStep[] = warp
     ? [
@@ -357,11 +643,12 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
           // with the proxy flag pointing at a port nobody listens on, rather than the whole desktop
           // being marked dead.
           //
-          // Detached + polled, NOT run as one foreground command. Measured live on a cold box: the
+          // Detached, not run as one foreground command. Measured live on a cold box: the
           // curl + `apt-get update` + `apt-get install cloudflare-warp` chain blows past the step
           // budget, and because a step timeout aborts the WHOLE provision, the failure mode was the
           // desktop never launching at all (not merely "no WARP"). Backgrounding it means the envd
-          // call returns immediately and only the bounded wait is exposed to the transport.
+          // call returns immediately. The keeper publishes a not-ready egress verdict until the
+          // client appears, then verifies/reconnects it without holding desktop startup.
           run:
             `cat > /tmp/warp-install.sh <<'WARP_INSTALL_EOF'\n` +
             `CN=$(. /etc/os-release && echo "\${VERSION_CODENAME:-bookworm}")\n` +
@@ -371,19 +658,42 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
             `  apt-get -o DPkg::Lock::Timeout=60 update -qq &&\n` +
             `  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 install -y --no-install-recommends cloudflare-warp\n` +
             `WARP_INSTALL_EOF\n` +
-            `nohup sh /tmp/warp-install.sh >/tmp/warp-install.log 2>&1 &\n` +
-            `i=0; while [ $i -lt 90 ] && ! command -v warp-cli >/dev/null 2>&1; do i=$((i+1)); sleep 2; done; ` +
-            `command -v warp-cli >/dev/null 2>&1 && echo "[provision] warp-cli installed" || echo "[provision] cloudflare-warp still installing/failed; browser will egress direct"; exit 0`,
+            `setsid flock -n /tmp/warp-install.lock sh /tmp/warp-install.sh < /dev/null > /tmp/warp-install.log 2>&1 &\n` +
+            `exit 0`,
           timeoutMs: 240_000,
         },
         {
           id: "warp-up",
-          label: "bring WARP up in proxy mode (SOCKS5 on loopback)",
-          // Guard on the TUNNEL being up (warp=on through the socket), not on the daemon's pid: a
-          // revived box can have warp-svc running but disconnected after the infra pause/resume.
-          check: `curl -s --max-time 4 --proxy socks5h://127.0.0.1:${WARP_PORT} https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q '^warp=on'`,
+          label: "bring WARP up in proxy mode, escalating until traffic verifies",
+          // Guard on the TUNNEL passing traffic, not on the daemon's pid: a revived box routinely has
+          // warp-svc running while disconnected (measured — that state persisted for a day).
+          check: `sh /opt/warp-verify.sh ${WARP_PORT} >/dev/null 2>&1`,
+          // `exit 0` even when the ladder is exhausted: provisioning must not fail over egress, or a
+          // WARP outage would mean no desktop at all instead of a desktop whose browser errors on
+          // walled sites. The keeper below keeps trying, and the state file records the truth.
           run: `command -v warp-cli >/dev/null 2>&1 && sh /opt/warp-up.sh ${WARP_PORT} >/tmp/warp-up.log 2>&1; exit 0`,
-          timeoutMs: 60_000,
+          timeoutMs: 180_000,
+        },
+        {
+          id: "warp-keeper",
+          label: "start the egress keeper (re-verifies and reconnects for the life of the box)",
+          // The piece that makes this deliverable rather than merely recoverable-at-connect: a tunnel
+          // that dies mid-session is healed within ~30s instead of silently degrading until someone
+          // notices the browser has been on a datacenter IP. Bracketed pattern — an unbracketed
+          // `pgrep -f warp-keeper` matches the very shell running this check.
+          check: "pgrep -f '[w]arp-keeper.sh' >/dev/null 2>&1",
+          // The `&` must bind to the setsid ALONE. Written as `command -v warp-cli && setsid … &` it
+          // backgrounds the whole `&&` LIST, so bash forks a subshell that waits on the keeper — and
+          // that subshell inherits envd's stdout, which therefore never sees EOF, so the call hangs
+          // until its timeout and provisioning fails for a keeper that started perfectly. Exactly the
+          // trap that bit the MCP bridge; verified here the same way (a live provision timed out at
+          // this step). Launch setsid as its own statement,
+          // with all three fds redirected so nothing is left holding a pipe. The keeper must start
+          // even before warp-cli is installed, because readiness requires this supervisor.
+          run:
+            `setsid sh /opt/warp-keeper.sh ${WARP_PORT} < /dev/null > /tmp/warp-keeper.boot 2>&1 &\n` +
+            `exit 0`,
+          timeoutMs: 15_000,
         },
       ]
     : [];
@@ -391,8 +701,20 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
   return {
     files: [
       { path: "/opt/cdp-proxy.js", content: CDP_PROXY_JS },
+      // The stdio→HTTP MCP bridge. No step launches it: one process per bridged server is started
+      // by `bootstrapBot` from its DB row. It ships HERE because provision runs on connect as well
+      // as create, so the script is restored after the gateway's forced pause/resume for free.
+      { path: MCP_BRIDGE_PATH, content: MCP_BRIDGE_JS },
       { path: "/opt/start-desktop.sh", content: START_DESKTOP_SH },
-      ...(warp ? [{ path: "/opt/warp-up.sh", content: WARP_UP_SH }] : []),
+      { path: "/opt/ibot-recorder.sh", content: RECORDER_SH },
+      ...(warp
+        ? [
+            { path: "/opt/warp-verify.sh", content: WARP_VERIFY_SH },
+            { path: "/opt/warp-up.sh", content: WARP_UP_SH },
+            { path: "/opt/warp-keeper.sh", content: WARP_KEEPER_SH },
+          ]
+        : []),
+      ...(pac ? [{ path: PROXY_PAC_PATH, content: pac }] : []),
     ],
     steps: [
       {
@@ -456,9 +778,10 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
           `|| echo "[provision] google-chrome install failed; falling back to chromium"; exit 0`,
         timeoutMs: 180_000,
       },
-      // WARP must be installed + connected BEFORE Chrome launches: Chrome reads --proxy-server once
-      // at startup and there is no runtime toggle, so a late-arriving proxy would leave the running
-      // browser egressing direct until the next relaunch.
+      // WARP should be up BEFORE Chrome launches. The PAC's DIRECT fallback means a late WARP no
+      // longer leaves the browser dead, but Chrome marks a failed proxy bad for ~5 min before
+      // retrying it — so a Chrome started against a not-yet-connected WARP egresses from the
+      // datacenter IP (and fails CF challenges) for that window.
       ...warpSteps,
       {
         id: "xvfb",
@@ -491,8 +814,10 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
         // - --disable-dev-shm-usage: /dev/shm is tiny in the container; without it Chrome crashes.
         // - --disable-blink-features=AutomationControlled: THE webdriver fix. Native, no JS rewrite,
         //   so it leaves no tamper trace for Turnstile's integrity check (a JS patch does — 300010).
-        // - --proxy-server (warp only): route the browser's egress through WARP's SOCKS5 for a clean
-        //   IP. Chrome-only; see DesktopProvisionOptions.warp.
+        // - --proxy-pac-url (warp only): per-host split — CN hosts direct, the rest through WARP's
+        //   SOCKS5 for a clean IP, DIRECT fallback if WARP is down. Chrome-only; see proxy-pac.ts and
+        //   DesktopProvisionOptions.warp/directDomains. The value is single-quoted: base64 is
+        //   shell-safe but the `;` in the media type is not.
         // - NO --disable-gpu: it forces software rendering and can make getContext('webgl') return
         //   null — a null WebGL context is a stronger tell than an honest SwiftShader one. We keep
         //   WebGL functional (software/SwiftShader, since the box has no GPU) and report it honestly.
@@ -550,9 +875,15 @@ export function desktopProvisionPlan(opts: DesktopProvisionOptions = {}): Provis
         id: "novnc",
         command: `curl -sf --max-time 6 http://127.0.0.1:${P.novnc}/vnc.html -o /dev/null`,
       },
-      // NOTE: WARP is deliberately NOT a readiness gate. A slow/blocked WARP would otherwise mark
-      // the whole desktop dead (row → kill) when everything else works; the warp-up step already
-      // waited a bounded time and logged the outcome, and re-provision reconnects it.
+      // WARP being UP is deliberately NOT a readiness gate: a blocked Cloudflare would otherwise mark
+      // the whole desktop dead (row → kill) when everything else works. What IS gated is the keeper
+      // RUNNING — that costs nothing, can't fail for network reasons, and is what guarantees the box
+      // never sits with a silently dirty egress. The verdict itself lives in EGRESS_STATE_PATH for
+      // the platform to read (`readEgressState`), so "is this box's browser clean right now" is a
+      // question with an answer instead of an assumption.
+      ...(warp
+        ? [{ id: "warp-keeper", command: "pgrep -f '[w]arp-keeper.sh' >/dev/null 2>&1" }]
+        : []),
     ],
   };
 }

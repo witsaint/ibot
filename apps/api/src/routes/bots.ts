@@ -10,6 +10,8 @@ import { asc, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { AppBindings } from "../context.js";
 import { assertOwnerOfBot } from "../middleware/auth.js";
+import { ensureBotPlugins } from "../plugins/builtin.js";
+import { botPluginsHandler } from "./plugins.js";
 import { deleteSecret, isValidSecretName, listSecrets, putSecret } from "../secrets/vault.js";
 
 /** Body for a bot-scoped secret (mirrors the user-scoped one in settings). */
@@ -78,6 +80,18 @@ export const botsRoutes = new Hono<AppBindings>()
         status: "creating",
       })
       .returning();
+
+    // Give the new bot its capability baseline: the owner's builtin installs (so a brand-new signup
+    // doesn't wait for a restart to have core) plus this bot's own `local` plugin — the bundle its
+    // recorded skills will land in. Awaited so the first turn already resolves a complete set; it
+    // never throws, so a failure here degrades to the nine primitives instead of failing the create.
+    const { logger } = c.get("ctx");
+    await ensureBotPlugins(db, {
+      botId: row!.id,
+      ownerId: userId,
+      botName: row!.name,
+      logger,
+    });
     return c.json({ bot: row }, 201);
   })
 
@@ -207,6 +221,11 @@ export const botsRoutes = new Hono<AppBindings>()
     mgr.setHumanControl(botId, body.data.held);
     return c.json({ held: body.data.held });
   })
+
+  // ---------- this bot's effective capability set ----------
+  // The same resolution the run loop performs, so the composer menu offers exactly what the model
+  // can call. Handler lives in routes/plugins.ts; mounted here to keep bot ownership checks together.
+  .get("/:botId/plugins", botPluginsHandler)
 
   // ---------- bot-scoped secrets (this bot only) ----------
   // Back `{{secrets.NAME}}` for a single bot. Owner-gated; write-only value (never returned);

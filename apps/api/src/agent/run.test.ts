@@ -4,10 +4,34 @@
  * no-op (undefined) so the overwhelming majority of steps carry zero overhead.
  */
 import type { ModelMessage } from "ai";
-import { describe, expect, it } from "vitest";
-import { injectSteer } from "./run.js";
+import { describe, expect, it, vi } from "vitest";
+import { injectSteer, releaseStreamOnClose } from "./run.js";
 
 const base: ModelMessage[] = [{ role: "user", content: [{ type: "text", text: "first task" }] }];
+
+describe("foreground response cancellation", () => {
+  it("releases the turn and cancels the source when the client disconnects", async () => {
+    const cancelSource = vi.fn();
+    const release = vi.fn();
+    const source = new ReadableStream<Uint8Array>({ cancel: cancelSource });
+    const response = releaseStreamOnClose(new Response(source), release);
+    await response.body!.cancel("client disconnected");
+    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledWith("client disconnected");
+    expect(cancelSource).toHaveBeenCalledWith("client disconnected");
+  });
+
+  it("preserves a successful response without treating it as cancellation", async () => {
+    const release = vi.fn();
+    const response = releaseStreamOnClose(
+      new Response("data: result\n\n", { headers: { "content-type": "text/event-stream" } }),
+      release,
+    );
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    expect(await response.text()).toBe("data: result\n\n");
+    expect(release).not.toHaveBeenCalled();
+  });
+});
 
 describe("injectSteer", () => {
   it("returns undefined when nothing is queued (no per-step override)", () => {

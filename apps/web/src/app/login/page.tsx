@@ -11,7 +11,8 @@ import { useEffect } from "react";
 export default function LoginRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/");
+    // Keep the return destination and expiry notice when following an older /login link.
+    router.replace(`/${window.location.search}`);
   }, [router]);
 
   return (

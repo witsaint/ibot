@@ -6,7 +6,7 @@
  */
 import type { SandboxProviderName } from "@i-bot/types";
 import { CommandExitError, type Sandbox, SandboxNotFoundError } from "ppio-sandbox";
-import type { CommandResult, SandboxHandle } from "../index.js";
+import type { CommandResult, SandboxEntry, SandboxFiles, SandboxHandle } from "../index.js";
 import type { PpioProviderMeta } from "./meta.js";
 
 /** Minimal keepalive contract the handle needs — its concrete class satisfies this. */
@@ -28,11 +28,76 @@ export interface PpioSandboxHandleDeps {
   keepalive: Stoppable;
 }
 
+/**
+ * `SandboxFiles` over the SDK's `files`. A thin adapter on purpose: it narrows the SDK's surface to
+ * the subset the interface promises, and normalizes what leaks through.
+ *
+ * Two normalizations worth naming, because both would otherwise surface as confusing tool output:
+ *  - `write` makes the parent directory first. The SDK errors on a missing parent, and "write a new
+ *    file into a new folder" is the single most common thing a code-editing agent does.
+ *  - `list` maps the SDK's `FileType` enum to a plain string union so nothing downstream has to
+ *    import the SDK to compare against it.
+ */
+class PpioSandboxFiles implements SandboxFiles {
+  #instance: Sandbox;
+
+  constructor(instance: Sandbox) {
+    this.#instance = instance;
+  }
+
+  async readText(path: string): Promise<string> {
+    return this.#instance.files.read(path, { format: "text" });
+  }
+
+  async readBytes(path: string): Promise<Uint8Array> {
+    return this.#instance.files.read(path, { format: "bytes" });
+  }
+
+  async write(path: string, content: string): Promise<void> {
+    // The SDK refuses a write whose parent doesn't exist; creating a file in a fresh directory is
+    // routine for this caller, so absorb it here rather than making every tool remember a mkdir.
+    const parent = path.replace(/\/+[^/]*$/, "");
+    if (parent && parent !== path) await this.#instance.files.makeDir(parent).catch(() => false);
+    await this.#instance.files.write(path, content);
+  }
+
+  async list(path: string, opts?: { depth?: number }): Promise<SandboxEntry[]> {
+    const entries = await this.#instance.files.list(path, {
+      ...(opts?.depth !== undefined ? { depth: opts.depth } : {}),
+    });
+    return entries.map((e) => ({
+      name: e.name,
+      path: e.path,
+      // FileType is an enum whose values are already "file"/"dir"; compare as strings so this file
+      // stays the only place that knows the SDK's shape.
+      ...(e.type === "file" || e.type === "dir" ? { type: e.type } : {}),
+      size: e.size,
+    }));
+  }
+
+  async makeDir(path: string): Promise<boolean> {
+    return this.#instance.files.makeDir(path);
+  }
+
+  async remove(path: string): Promise<void> {
+    await this.#instance.files.remove(path);
+  }
+
+  async exists(path: string): Promise<boolean> {
+    return this.#instance.files.exists(path);
+  }
+
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    await this.#instance.files.rename(oldPath, newPath);
+  }
+}
+
 export class PpioSandboxHandle implements SandboxHandle {
   readonly provider: SandboxProviderName = "ppio";
   readonly id: string;
   readonly providerSandboxId: string;
   readonly meta: Record<string, unknown>;
+  readonly files: SandboxFiles;
 
   #instance: Sandbox;
   #keepalive: Stoppable;
@@ -46,6 +111,7 @@ export class PpioSandboxHandle implements SandboxHandle {
     // what connect() needs to reattach. Persist THIS as provider_sandbox_id.
     this.providerSandboxId = deps.instance.sandboxId;
     this.meta = { ...deps.meta };
+    this.files = new PpioSandboxFiles(deps.instance);
   }
 
   getHost(port: number): string {

@@ -1,4 +1,10 @@
-import type { MessagePart, SecretMeta } from "@i-bot/types";
+import type {
+  AutomationTrigger,
+  AutomationRunStatus,
+  MessagePart,
+  PluginManifest,
+  SecretMeta,
+} from "@i-bot/types";
 import { sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
@@ -53,6 +59,86 @@ export const agentJobStatus = pgEnum("agent_job_status", ["running", "done", "er
  * conversation when it finishes (never streamed into the transcript step-by-step).
  */
 export const agentJobKind = pgEnum("agent_job_kind", ["background", "subagent"]);
+/** where a plugin came from — decides who may edit it (see @i-bot/types PluginSource) */
+export const pluginSource = pgEnum("plugin_source", ["builtin", "installed", "local"]);
+/** who an installation belongs to. `org` is reserved; there is no org table yet. */
+export const pluginOwner = pgEnum("plugin_owner", ["user", "org"]);
+
+// ---------- plugins (the packaging unit for capability) ----------
+/**
+ * A plugin is one bundle of capability — skills + MCP servers + agents + card templates + setup
+ * steps + hooks + files — installed, enabled, upgraded and removed as a whole. `manifest` (the
+ * `PluginManifest` contract in `@i-bot/types`) is the single source of truth for what it
+ * contributes; the rows it expands into (`skills`, `bot_mcp_servers`, `bot_setup_steps`) carry a
+ * `plugin_id` back to here so they can be re-derived or removed together.
+ *
+ * The platform never EXECUTES anything in a manifest: it parses, validates, stores and expands it.
+ * The executable parts (setup steps, a stdio MCP `command`, a `command` hook, carried files) run
+ * inside the owning bot's own sandbox, the same trust plane the model's `run_command` already has.
+ *
+ * `unique(key, version)` makes an upgrade a NEW row rather than a mutation, so an install can be
+ * repointed (and rolled back) without losing what the previous version declared. A `local` plugin
+ * is the exception — it stays at `0.0.0-local` and is edited in place.
+ */
+export const plugins = pgTable(
+  "plugins",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** stable identity across versions: "@ibot/ui" | "acme/crm" | "local:<botId>" */
+    key: text("key").notNull(),
+    /** semver, or the fixed `0.0.0-local` for a bot's own local bundle */
+    version: text("version").notNull(),
+    source: pluginSource("source").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull().default(""),
+    /** {name, email?, url?} */
+    author: jsonb("author").$type<Record<string, unknown>>(),
+    homepage: text("homepage"),
+    /** the normalized PluginManifest — everything the plugin contributes */
+    manifest: jsonb("manifest").$type<PluginManifest>().notNull(),
+    /** sha256 of the normalized manifest; upgrade + box-materialization idempotency key */
+    contentHash: text("content_hash").notNull(),
+    requires: jsonb("requires")
+      .$type<{ plugin: string; version?: string }[]>()
+      .notNull()
+      .default([]),
+    /** vault names this plugin needs; a missing one is reported at install, not silently dropped */
+    requiredSecrets: jsonb("required_secrets").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("plugins_key_version_unique").on(t.key, t.version)],
+);
+
+/**
+ * One owner's installation of a plugin. `enabledBots` null = every bot that owner has (including
+ * ones created later); an array restricts it to those ids. `enabled: false` keeps the row but
+ * contributes nothing at run time. `config` holds the answers to the manifest's `userConfig` —
+ * non-sensitive values only; credentials live in `tenant_secrets` and are referenced by name.
+ *
+ * `owner_id` is text with no FK because it holds either a better-auth user id or (reserved) an org
+ * id; tenant isolation is enforced by the queries, which always filter on the caller's owner.
+ */
+export const pluginInstalls = pgTable(
+  "plugin_installs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pluginId: uuid("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "cascade" }),
+    ownerType: pluginOwner("owner_type").notNull(),
+    ownerId: text("owner_id").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** null = all of this owner's bots; otherwise an explicit bot-id allowlist */
+    enabledBots: jsonb("enabled_bots").$type<string[]>(),
+    config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
+    installedAt: timestamp("installed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("plugin_installs_plugin_owner_unique").on(t.pluginId, t.ownerType, t.ownerId),
+    index("plugin_installs_owner_idx").on(t.ownerType, t.ownerId),
+  ],
+);
 
 // ---------- bots ----------
 export const bots = pgTable(
@@ -128,10 +214,15 @@ export const botSetupSteps = pgTable(
     spec: jsonb("spec").notNull(),
     status: setupStepStatus("status").notNull().default("pending"),
     lastError: text("last_error"),
+    /** the plugin this step was expanded from; null = added directly (pre-plugin, or ad hoc) */
+    pluginId: uuid("plugin_id").references(() => plugins.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     appliedAt: timestamp("applied_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("bot_setup_steps_bot_ord_unique").on(t.botId, t.ord)],
+  (t) => [
+    uniqueIndex("bot_setup_steps_bot_ord_unique").on(t.botId, t.ord),
+    index("bot_setup_steps_plugin_idx").on(t.pluginId),
+  ],
 );
 
 // ---------- MCP servers (per bot) ----------
@@ -169,9 +260,14 @@ export const botMcpServers = pgTable(
       path: string;
     }>(),
     enabled: boolean("enabled").notNull().default(true),
+    /** the plugin this server was expanded from; null = bound directly (`bind_mcp`, pre-plugin) */
+    pluginId: uuid("plugin_id").references(() => plugins.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("bot_mcp_servers_bot_idx").on(t.botId)],
+  (t) => [
+    index("bot_mcp_servers_bot_idx").on(t.botId),
+    index("bot_mcp_servers_plugin_idx").on(t.pluginId),
+  ],
 );
 
 // ---------- skills (Postgres is the source of truth) ----------
@@ -211,9 +307,19 @@ export const skills = pgTable(
      * Kept as jsonb (not a vector column) so the schema needs no pgvector extension yet.
      */
     embedding: jsonb("embedding").$type<number[]>(),
+    /**
+     * The plugin this skill was expanded from. Every plugin-expanded skill row is PER BOT
+     * (`scope='bot'`, `ownerRef=botId`) — a builtin skill enabled on N bots is N rows — so tenant
+     * isolation stays a SQL predicate rather than a scope convention. A user's own recorded skills
+     * point at their bot's `local` plugin; null = a row written before plugins existed.
+     */
+    pluginId: uuid("plugin_id").references(() => plugins.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("skills_scope_owner_idx").on(t.scope, t.ownerRef)],
+  (t) => [
+    index("skills_scope_owner_idx").on(t.scope, t.ownerRef),
+    index("skills_plugin_idx").on(t.pluginId),
+  ],
 );
 
 // ---------- conversations (a thread, belongs to one bot) ----------
@@ -405,5 +511,91 @@ export const agentJobs = pgTable(
     index("agent_jobs_bot_idx").on(t.botId, t.createdAt),
     index("agent_jobs_conversation_idx").on(t.conversationId, t.createdAt),
     index("agent_jobs_parent_idx").on(t.parentJobId),
+  ],
+);
+
+// Durable rules and executions. Secrets are encrypted server-side; views never expose them.
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    instruction: text("instruction").notNull(),
+    trigger: jsonb("trigger").$type<AutomationTrigger>().notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    needsDesktop: boolean("needs_desktop").notNull().default(true),
+    maxRunsPerDay: integer("max_runs_per_day").notNull().default(20),
+    maxDurationSeconds: integer("max_duration_seconds").notNull().default(900),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    pauseReason: text("pause_reason"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    webhookKey: text("webhook_key"),
+    callbackUrl: text("callback_url"),
+    callbackKey: text("callback_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("automations_bot_idx").on(t.botId),
+    index("automations_due_idx").on(t.enabled, t.nextRunAt),
+  ],
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    botId: uuid("bot_id")
+      .notNull()
+      .references(() => bots.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    source: text("source").$type<"schedule" | "webhook" | "manual">().notNull(),
+    status: text("status").$type<AutomationRunStatus>().notNull().default("queued"),
+    input: jsonb("input").$type<Record<string, unknown>>(),
+    resumeMessage: text("resume_message"),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    cancelRequested: boolean("cancel_requested").notNull().default(false),
+    attempts: integer("attempts").notNull().default(0),
+    summary: text("summary"),
+    error: text("error"),
+    resultMessageId: uuid("result_message_id").references(() => messages.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    // Callback outbox lives on the execution; frozen body and target make retries deterministic.
+    deliveryStatus: text("delivery_status").$type<"pending" | "delivered" | "failed">(),
+    deliveryBody: jsonb("delivery_body").$type<Record<string, unknown>>(),
+    deliveryUrl: text("delivery_url"),
+    deliveryKey: text("delivery_key"),
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    deliveryError: text("delivery_error"),
+    deliveryNextAt: timestamp("delivery_next_at", { withTimezone: true }),
+    deliveryLease: text("delivery_lease"),
+    deliveryLeaseExpiresAt: timestamp("delivery_lease_expires_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("automation_runs_event_unique").on(t.automationId, t.eventId),
+    uniqueIndex("automation_runs_running_bot_unique")
+      .on(t.botId)
+      .where(sql`status = 'running'`),
+    index("automation_runs_queue_idx").on(t.status, t.availableAt),
+    index("automation_runs_rule_idx").on(t.automationId, t.createdAt),
   ],
 );

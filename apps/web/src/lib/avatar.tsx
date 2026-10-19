@@ -15,6 +15,7 @@
  * hexes), not UI chrome, so it doesn't reference design tokens.
  */
 import type { CSSProperties } from "react";
+import { composeRunningBodySvg } from "./running-body";
 import {
   BODY_ITEMS,
   BODY_SVGS,
@@ -85,28 +86,69 @@ export function serializeAvatar(c: AvatarConfig): string {
 }
 
 /**
- * Compose the three chosen widgets onto a background into one inline SVG string. Layer offsets and
- * the 700×700 canvas mirror the reference composer; the centering nudge is on an inner group (not
- * the root <svg>, where a transform isn't reliably honored). The peep art is fill-based, so the
- * inherited `stroke`/`stroke-width` barely matter but are kept to match the source.
+ * The peeps widgets' layer offsets — the ONE place they live. The square avatar draws head + peeps
+ * body; the standing figure draws the same head over a different body, so `withBody` toggles the
+ * peeps torso and the head stays byte-identical between the two.
+ *
+ * Offsets mirror the reference composer; the centering nudge is on an inner group (not the root
+ * <svg>, where a transform isn't reliably honored). Measured across all widgets, the head lands ~+59
+ * and the body ~+38 right of center at the reference offsets; a -73 outer shift splits the
+ * difference so both sit within ±11px of the midline.
  */
-function composeAvatarSvg(config: AvatarConfig, size: number): string {
-  const bg = BACKGROUNDS[config.bg % BACKGROUNDS.length];
-  const body = BODY_SVGS[config.body % BODY_SVGS.length] ?? "";
+function peepsLayers(config: AvatarConfig, withBody: boolean): string {
+  const body = withBody ? (BODY_SVGS[config.body % BODY_SVGS.length] ?? "") : "";
   const hair = HAIR_SVGS[config.hair % HAIR_SVGS.length] ?? "";
   const face = FACE_SVGS[config.face % FACE_SVGS.length] ?? "";
   return (
-    `<svg width="${size}" height="${size}" viewBox="0 0 700 700" fill="none" stroke="#000" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">` +
-    `<rect x="0" y="0" width="700" height="700" fill="${bg}"/>` +
-    // Center the head+body group on the canvas. Measured across all widgets, the head lands ~+59
-    // and the body ~+38 right of center at the reference offsets; a -73 outer shift splits the
-    // difference so both sit within ±11px of the midline (was -25, which left everything right-skewed).
     `<g transform="translate(-73, 0)">` +
-    `<g transform="translate(0, 550)">${body}</g>` +
+    (withBody ? `<g transform="translate(0, 550)">${body}</g>` : "") +
     `<g transform="translate(200, 50)">${hair}</g>` +
     `<g transform="translate(320, 250)"><g>${face}</g></g>` +
-    `</g>` +
+    `</g>`
+  );
+}
+
+/**
+ * The shared root element: both composers open with identical attributes. The <svg> is sized
+ * 100%/100% and the WRAPPER (BotAvatar / WalkingBot's <span>) carries the pixel size — so a caller
+ * can rescale an avatar with plain CSS on the wrapper (e.g. `width:100%` inside a picker tile) and
+ * the drawing follows; a fixed px on the <svg> itself would overflow or crop instead.
+ */
+const svgOpen = (viewBox: string): string =>
+  `<svg width="100%" height="100%" viewBox="${viewBox}" fill="none" stroke="#000" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">`;
+
+/**
+ * Compose the three chosen widgets onto a background into one inline SVG string — the square
+ * avatar (bust). The 700×700 canvas crops at the waist, which is what makes it a portrait. The
+ * peep art is fill-based, so the inherited `stroke`/`stroke-width` barely matter but are kept to
+ * match the source.
+ */
+function composeAvatarSvg(config: AvatarConfig): string {
+  const bg = BACKGROUNDS[config.bg % BACKGROUNDS.length];
+  return (
+    svgOpen("0 0 700 700") +
+    `<rect x="0" y="0" width="700" height="700" fill="${bg}"/>` +
+    peepsLayers(config, true) +
     `</svg>`
+  );
+}
+
+/** The supplied body and the existing portrait head; the portrait composer stays independent. */
+export function composeFullFigureSvg(config: AvatarConfig, id: string): string {
+  return (
+    svgOpen("-150 0 1100 1800") +
+    // Reuse Loader's brightness animation; decreasing delays send the wave right to left.
+    `<g data-part="road" fill="var(--ink)" stroke="none">` +
+    Array.from(
+      { length: 12 },
+      (_, i) =>
+        `<rect class="ui-pixel" x="${-125 + i * 90}" y="1638" width="60" height="60" style="opacity:0.15;animation-duration:650ms;animation-delay:${-i * 90}ms"/>`,
+    ).join("") +
+    `</g>` +
+    `<g data-part="figure">` +
+    composeRunningBodySvg(id) +
+    peepsLayers(config, false) +
+    `</g></svg>`
   );
 }
 
@@ -129,7 +171,7 @@ export function BotAvatar({
       style={{ display: "block", width: size, height: size, lineHeight: 0, ...style }}
       // The widget markup is vendored, static, build-time content (no user input), composed into
       // one SVG string. Inline SVG via innerHTML is how the source renders layered peeps too.
-      dangerouslySetInnerHTML={{ __html: composeAvatarSvg(config, size) }}
+      dangerouslySetInnerHTML={{ __html: composeAvatarSvg(config) }}
     />
   );
 }

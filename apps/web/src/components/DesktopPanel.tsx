@@ -2,7 +2,12 @@
 
 import type RFB from "@novnc/novnc";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { SkillDraft } from "@i-bot/types";
 import { api, type SandboxView } from "@/lib/api";
+import { errorText } from "@/lib/errors";
+import { SkillReviewDialog } from "@/components/SkillReviewDialog";
+import { Elapsed } from "@/components/ui/Elapsed";
+import { LoadingStatus } from "@/components/ui/LoadingStatus";
 
 /**
  * The live desktop pane — the "verify execution location" surface. It shows the bot's
@@ -69,10 +74,20 @@ function isApplePlatform(): boolean {
  *
  * Only Meta is touched. noVNC already handles the other mac quirks (semicolon layout, Alt→AltGraph,
  * the flaky Meta release, CapsLock), and re-doing that work here would double-patch them.
+ *
+ * DECIDE BY `code`, NEVER BY `metaKey`. On the Cmd key's own `keyup`, `e.metaKey` is already false
+ * (the modifier is no longer held at the moment of its release). The first version gated on
+ * `metaKey`, so the down was rewritten to Ctrl and the up was not — noVNC's `_keyDownList` had a
+ * ControlLeft entry with no matching release, and the remote X server was left with Control_L held
+ * DOWN. Every letter typed afterwards became Ctrl+letter: the URL bar "wouldn't type". Verified on
+ * the box with XQueryKeymap (`Control_L` stuck), released with `xdotool keyup Control_L`.
  */
+function isCmdKey(e: KeyboardEvent): boolean {
+  return e.code === "MetaLeft" || e.code === "MetaRight";
+}
 function rewriteCmdToCtrl(e: KeyboardEvent): void {
   Object.defineProperty(e, "metaKey", { value: false, configurable: true });
-  if (e.code === "MetaLeft" || e.code === "MetaRight") {
+  if (isCmdKey(e)) {
     Object.defineProperty(e, "code", { value: "ControlLeft", configurable: true });
     Object.defineProperty(e, "key", { value: "Control", configurable: true });
   }
@@ -92,6 +107,14 @@ export function DesktopPanel({
   const [startError, setStartError] = useState<string | null>(null);
   const [interactive, setInteractive] = useState(false);
   const [connected, setConnected] = useState(false);
+  // Record → skill, for the human session. `recording` = the on-box sampler is running;
+  // `recStartedAt` feeds the elapsed counter; `analyzing` = frames are being pulled + distilled;
+  // `recDraft` opens the review dialog (same one the chat's conversation-distill uses).
+  const [recording, setRecording] = useState(false);
+  const [recStartedAt, setRecStartedAt] = useState<number | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [recDraft, setRecDraft] = useState<SkillDraft | null>(null);
+  const [recError, setRecError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   // Fullscreen: promote the pane to a window-filling overlay so the desktop is big enough to
   // actually work in. CSS-only (position:fixed) so the RFB host div never moves in the DOM → the
@@ -280,17 +303,49 @@ export function DesktopPanel({
   useEffect(() => {
     const host = screenHostRef.current;
     if (!interactive || !host || !isApplePlatform()) return;
+    // Rewrite when the Cmd key ITSELF is pressed/released (by code — see rewriteCmdToCtrl for why
+    // not metaKey), and when any other key is pressed while Cmd is held (metaKey is reliable there).
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey) rewriteCmdToCtrl(e);
+      if (isCmdKey(e) || e.metaKey) rewriteCmdToCtrl(e);
     };
-    // capture on both, so a Cmd-down and its release are rewritten symmetrically (see the
-    // stuck-Ctrl note in rewriteCmdToCtrl).
     host.addEventListener("keydown", onKey, { capture: true });
     host.addEventListener("keyup", onKey, { capture: true });
     return () => {
       host.removeEventListener("keydown", onKey, { capture: true });
       host.removeEventListener("keyup", onKey, { capture: true });
     };
+  }, [interactive, connected]);
+
+  // Safety net: when control is released, or the window blurs mid-hold, tell the remote that every
+  // modifier is up. noVNC drops its own key-down list on blur but the X server only learns about a
+  // release if a key-up actually reaches it — a Cmd released while the browser lost focus never
+  // does, and would leave Control_L held on the box. RFB has no "release all", so we send the ups.
+  useEffect(() => {
+    const rfb = rfbRef.current;
+    if (!rfb) return;
+    const releaseAll = () => {
+      // keysyms: Control_L, Control_R, Shift_L, Alt_L, Super_L, Meta_L
+      for (const [ks, code] of [
+        [0xffe3, "ControlLeft"],
+        [0xffe4, "ControlRight"],
+        [0xffe1, "ShiftLeft"],
+        [0xffe9, "AltLeft"],
+        [0xffeb, "MetaLeft"],
+        [0xffe7, "MetaLeft"],
+      ] as const) {
+        try {
+          rfb.sendKey(ks, code, false);
+        } catch {
+          // client torn down — nothing to release
+        }
+      }
+    };
+    if (!interactive) {
+      releaseAll();
+      return;
+    }
+    window.addEventListener("blur", releaseAll);
+    return () => window.removeEventListener("blur", releaseAll);
   }, [interactive, connected]);
 
   // local → remote: noVNC has no key binding that pushes the browser clipboard to the desktop
@@ -384,6 +439,41 @@ export function DesktopPanel({
     setFullscreen(false);
     setInteractive(false);
   }, []);
+  const startRec = useCallback(async () => {
+    setRecError(null);
+    try {
+      await api.recording(botId, "start");
+      setRecording(true);
+      setRecStartedAt(Date.now());
+    } catch (err) {
+      setRecError(errorText(err, { fallback: "录制启动失败" }));
+    }
+  }, [botId]);
+
+  // Stop the sampler and turn the frames into a draft. Pressing Stop IS the analyze — there's no
+  // separate step, so the flow is: Record → do the thing → Stop → review → save.
+  const stopRecAndAnalyze = useCallback(async () => {
+    setRecording(false);
+    setRecStartedAt(null);
+    setAnalyzing(true);
+    setRecError(null);
+    try {
+      const { draft } = await api.analyzeRecording(botId);
+      setRecDraft(draft);
+    } catch (err) {
+      setRecError(errorText(err, { fallback: "分析失败" }));
+      // keep the recording on the box so a retry is possible; discard happens on dialog close
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [botId]);
+
+  // Releasing control (or the box going away) while recording ends the recording too: the person
+  // is no longer driving, so there's nothing more to capture. Analyze what we have.
+  useEffect(() => {
+    if (recording && !interactive) void stopRecAndAnalyze();
+  }, [interactive, recording, stopRecAndAnalyze]);
+
   useEffect(() => {
     if (!fullscreen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -529,6 +619,39 @@ export function DesktopPanel({
                     {statusLabel}
                   </span>
                 )}
+                {interactive && (
+                  <button
+                    // Record → skill. Solid like Release (it floats over a live frame). While
+                    // recording it turns into Stop with a pulsing dot + elapsed time; Stop analyzes.
+                    className="btn btn-sm"
+                    style={{
+                      pointerEvents: "auto",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      ...(recording
+                        ? { borderColor: "var(--danger)", color: "var(--danger)" }
+                        : {}),
+                    }}
+                    disabled={analyzing}
+                    onClick={recording ? () => void stopRecAndAnalyze() : () => void startRec()}
+                    title={
+                      recording
+                        ? "停止录制并分析这段操作,生成一个可复用的技能"
+                        : "录制接下来的操作,停止后自动分析成技能"
+                    }
+                  >
+                    <span
+                      className={recording ? "dot dot-danger dot-live" : "dot dot-muted"}
+                      style={{ width: 7, height: 7 }}
+                    />
+                    {recording ? (
+                      <>停止录制 · {recStartedAt !== null && <Elapsed since={recStartedAt} />}</>
+                    ) : (
+                      "录制技能"
+                    )}
+                  </button>
+                )}
                 <button
                   // Release must stay readable floating over the live desktop, so it's a solid
                   // (opaque) button, never `btn-ghost` (transparent → invisible on a busy frame).
@@ -547,6 +670,45 @@ export function DesktopPanel({
                   {interactive ? "Release control (Esc)" : "Take control"}
                 </button>
               </div>
+
+              {/* analyzing: frames are being pulled and read by the model — a short wait */}
+              {(analyzing || recError) && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 12,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    padding: "6px 12px",
+                    borderRadius: 999,
+                    background: "color-mix(in srgb, var(--surface) 92%, transparent)",
+                    border: `1px solid ${recError ? "var(--danger)" : "var(--border)"}`,
+                    backdropFilter: "saturate(140%) blur(6px)",
+                    fontSize: "var(--text-caption)",
+                    color: recError ? "var(--danger)" : "var(--ink)",
+                    pointerEvents: "auto",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {analyzing ? (
+                    <LoadingStatus label="分析录制中" leading="grid" />
+                  ) : (
+                    <>
+                      {recError}
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => setRecError(null)}
+                        style={{ height: 22, padding: "0 8px" }}
+                      >
+                        知道了
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* connecting overlay until the noVNC page loads */}
               {!connected && (
@@ -626,6 +788,27 @@ export function DesktopPanel({
           )}
         </div>
       </div>
+
+      {/* Review-before-publish for a recorded session — the same dialog the chat's conversation
+          distill uses, so both paths land in one place. Closing (saved or cancelled) discards the
+          frames on the box; a failed analysis keeps them so Stop → retry works. */}
+      {recDraft && (
+        <SkillReviewDialog
+          botId={botId}
+          draft={recDraft}
+          onClose={() => {
+            setRecDraft(null);
+            void api.recording(botId, "discard").catch(() => {});
+          }}
+          onSaved={() => {
+            setRecDraft(null);
+            void api.recording(botId, "discard").catch(() => {});
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("ibot:skills-changed"));
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

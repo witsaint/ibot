@@ -25,6 +25,7 @@
     "@i-bot/types": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ai": "^7.0.97",
+    "cron-parser": "5.10.1",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
     "zod": "^4.6.2"

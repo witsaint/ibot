@@ -7,6 +7,7 @@ import {
   connectBrowser,
   resolveCdpWsEndpoint,
 } from "./browser-executor.js";
+import { fakeSandboxFiles } from "./files-stub.js";
 
 function fakeHandle(): SandboxHandle {
   return {
@@ -17,6 +18,7 @@ function fakeHandle(): SandboxHandle {
     getHost: (port) => `${port}-sbx-1.sandbox.example`,
     run: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     screenshot: async () => new Uint8Array(),
+    files: fakeSandboxFiles(),
     detach: () => {},
     destroy: async () => {},
   };

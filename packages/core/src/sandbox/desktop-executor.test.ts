@@ -1,6 +1,7 @@
 import type { DesktopAction } from "@i-bot/types";
 import { describe, expect, it } from "vitest";
 import type { CommandResult, SandboxHandle } from "../index.js";
+import { fakeSandboxFiles } from "./files-stub.js";
 import { executeDesktopAction } from "./desktop-executor.js";
 
 /** A fake handle that records the commands it's asked to run. */
@@ -20,6 +21,7 @@ function fakeHandle(opts?: { exitCode?: number; stderr?: string; screenshot?: Ui
       return { exitCode: opts?.exitCode ?? 0, stdout: "", stderr: opts?.stderr ?? "" };
     },
     screenshot: async () => opts?.screenshot ?? new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    files: fakeSandboxFiles(),
     detach: () => {},
     destroy: async () => {},
   };

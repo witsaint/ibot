@@ -50,6 +50,20 @@
       "when": 1789617551279,
       "tag": "0006_happy_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790071694042,
+      "tag": "0007_plugins",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790679653292,
+      "tag": "0008_automations",
+      "breakpoints": true
     }
   ]
 }

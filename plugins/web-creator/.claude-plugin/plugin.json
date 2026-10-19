@@ -1,0 +1,6 @@
+{
+  "name": "@ibot/web-creator",
+  "version": "1.0.5",
+  "displayName": "网页创作",
+  "description": "主动调用的网页内容、设计、开发与预览流程"
+}

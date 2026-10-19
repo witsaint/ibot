@@ -2,6 +2,9 @@ import type { SandboxProviderName } from "@i-bot/types";
 
 export { DESKTOP, getTemplate, TEMPLATES } from "@i-bot/templates";
 export type { SandboxTemplate } from "@i-bot/templates";
+// The in-box stdio→HTTP MCP bridge: its path and port base, which the API needs to build a
+// box-local server row. The script CONTENT stays in templates (it ships via the provision plan).
+export { MCP_BRIDGE_PATH, MCP_BRIDGE_PORT_BASE } from "@i-bot/templates";
 
 // ---------- Sandbox layer (PPIO via AIProxy gateway) ----------
 export { loadSandboxConfig, SandboxEnv, slugFromUrl, withChannelSlug } from "./sandbox/config.js";
@@ -18,9 +21,18 @@ export { PpioSandboxProvider } from "./sandbox/ppio-provider.js";
 export type { PpioSandboxProviderOptions } from "./sandbox/ppio-provider.js";
 export { provisionDesktop, ProvisionError } from "./sandbox/provision.js";
 export type { ProvisionOptions, ProvisionTarget } from "./sandbox/provision.js";
+// "Is this box's browser egress actually clean right now?" — read from the keeper's published
+// verdict rather than assumed. The whole failure this guards was a box that looked healthy while
+// silently egressing dirty.
+export { readEgressState, waitForCleanEgress } from "./sandbox/egress.js";
+export type { EgressState, EgressTarget } from "./sandbox/egress.js";
 export { TimeoutError, withTimeout } from "./sandbox/timeout.js";
 // executors — the primitives Mastra tools will wrap
 export { executeDesktopAction } from "./sandbox/desktop-executor.js";
+// Exported so apps/api's tests can build a handle fake without reimplementing a filesystem; adding a
+// method to `SandboxFiles` then doesn't mean touching every fake across the repo.
+export { fakeSandboxFiles } from "./sandbox/files-stub.js";
+export type { FakeSandboxFiles } from "./sandbox/files-stub.js";
 export {
   connectBrowser,
   defaultCdpConnector,
@@ -72,6 +84,20 @@ export interface SandboxHandle {
   /** grab a PNG screenshot of the desktop (bytes; caller decides where they land) */
   screenshot(): Promise<Uint8Array>;
   /**
+   * Direct file access inside the box, for the agent's code-editing tools.
+   *
+   * Why this exists when `run()` could `cat`/heredoc its way to the same place: a shell round trip
+   * makes the MODEL do the escaping. Writing a file through a heredoc means emitting the whole file
+   * (so a one-line change costs the file's full length, twice — once to read, once to rewrite), and
+   * any backtick, `$`, or terminator-looking line in the content is a silent corruption rather than
+   * an error. These calls carry the bytes on their own channel, so content is never parsed as shell.
+   *
+   * Deliberately a narrow, provider-agnostic subset — no streaming, no gzip, no watch. The concrete
+   * SDK type is NOT re-exported here: higher layers address a box only through this interface, and
+   * the moment a tool imports `Filesystem` from the SDK, swapping providers stops being possible.
+   */
+  readonly files: SandboxFiles;
+  /**
    * Drop this in-process handle WITHOUT touching the box: stop the keepalive loop and
    * release local resources, but leave the sandbox running on the control plane so a
    * later process can `connect()` and re-arm it. This is what a graceful server
@@ -81,6 +107,38 @@ export interface SandboxHandle {
   detach(): void;
   /** release the box on the control plane (real teardown — a user "Stop" / delete) */
   destroy(): Promise<void>;
+}
+
+/** One entry from `SandboxFiles.list`. `type` is absent when the box can't classify it. */
+export interface SandboxEntry {
+  name: string;
+  path: string;
+  type?: "file" | "dir";
+  size: number;
+}
+
+/**
+ * The file operations the platform needs inside a box. Intentionally smaller than any provider SDK's
+ * filesystem class: every method here is one the agent's tools actually call, so that a second
+ * provider only has to implement this much.
+ */
+export interface SandboxFiles {
+  /** Read a UTF-8 text file. Throws if the path is missing or is a directory. */
+  readText(path: string): Promise<string>;
+  /** Read raw bytes (images, archives). */
+  readBytes(path: string): Promise<Uint8Array>;
+  /** Write a file whole, creating parent dirs as needed. Overwrites. */
+  write(path: string, content: string): Promise<void>;
+  /** List a directory. `depth` > 1 walks subdirectories. */
+  list(path: string, opts?: { depth?: number }): Promise<SandboxEntry[]>;
+  /** mkdir -p. Resolves true when created, false when it already existed. */
+  makeDir(path: string): Promise<boolean>;
+  /** Delete a file or directory. */
+  remove(path: string): Promise<void>;
+  /** Does the path exist at all (file or dir)? */
+  exists(path: string): Promise<boolean>;
+  /** Move/rename. Parent of `newPath` must exist. */
+  rename(oldPath: string, newPath: string): Promise<void>;
 }
 
 export interface CommandResult {

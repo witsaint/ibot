@@ -38,6 +38,12 @@ export interface ProvisionOptions {
    * ignored when an explicit `plan` is supplied. See `DesktopProvisionOptions.warp`.
    */
   warp?: boolean;
+  /**
+   * Extra hosts (each + subdomains) the browser reaches DIRECT even with `warp` on, on top of the
+   * built-in CN whitelist. Ignored when `warp` is off or an explicit `plan` is supplied. See
+   * `DesktopProvisionOptions.directDomains`.
+   */
+  directDomains?: readonly string[];
 }
 
 const DEFAULTS = {
@@ -69,7 +75,10 @@ function shq(s: string): string {
 export async function provisionDesktop(
   target: ProvisionTarget,
   opts: ProvisionOptions = {},
-  plan: ProvisionPlan = desktopProvisionPlan({ warp: opts.warp ?? false }),
+  plan: ProvisionPlan = desktopProvisionPlan({
+    warp: opts.warp ?? false,
+    ...(opts.directDomains ? { directDomains: opts.directDomains } : {}),
+  }),
 ): Promise<void> {
   const totalTimeoutMs = opts.totalTimeoutMs ?? DEFAULTS.totalTimeoutMs;
   const stepTimeoutMs = opts.stepTimeoutMs ?? DEFAULTS.stepTimeoutMs;

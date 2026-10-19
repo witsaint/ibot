@@ -10,8 +10,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { AppBindings, AppContext } from "./context.js";
 import { requireAuth } from "./middleware/auth.js";
+import { automationsRoutes, automationWebhookRoutes } from "./routes/automations.js";
 import { botsRoutes } from "./routes/bots.js";
 import { chatRoutes } from "./routes/chat.js";
+import { pluginsRoutes } from "./routes/plugins.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { skillsRoutes } from "./routes/skills.js";
 
@@ -41,6 +43,9 @@ export function createServer(ctx: AppContext): Hono<AppBindings> {
   // better-auth: sign-up / sign-in / session / sign-out live under /api/auth/*
   app.on(["GET", "POST"], "/api/auth/*", (c) => ctx.auth.handler(c.req.raw));
 
+  // Signed webhook authentication is independent of browser sessions.
+  app.route("/api/webhooks/automations", automationWebhookRoutes);
+
   // authenticated API surface
   const api = new Hono<AppBindings>();
   api.use("*", requireAuth);
@@ -52,7 +57,9 @@ export function createServer(ctx: AppContext): Hono<AppBindings> {
     }),
   );
   api.route("/bots", botsRoutes);
+  api.route("/automations", automationsRoutes);
   api.route("/chat", chatRoutes);
+  api.route("/plugins", pluginsRoutes);
   api.route("/settings", settingsRoutes);
   api.route("/skills", skillsRoutes);
 

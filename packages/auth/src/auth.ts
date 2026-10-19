@@ -39,6 +39,8 @@ export function createAuth(cfg: AuthConfig) {
       },
     }),
     emailAndPassword: { enabled: true },
+    // Rolling session: renew an active login after 24h, extending both DB and cookie by 7 days.
+    session: { expiresIn: 7 * 24 * 60 * 60, updateAge: 24 * 60 * 60 },
   });
 }
 

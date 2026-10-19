@@ -62,6 +62,33 @@ export interface TaskSlot {
 export const MAX_CONCURRENT_TASKS = 3;
 
 /**
+ * Put `handle` in the map for `botId`, detaching whatever it replaces. The only way the manager
+ * populates its handle map.
+ *
+ * A handle owns a live `setInterval` keepalive, and dropping the map reference does NOT stop it. So
+ * a bare `map.set` over an existing entry leaks a renew loop that keeps calling the control plane
+ * for a box nobody will use again — once every 5 minutes, for the life of the process.
+ *
+ * Measured: a Restart whose reconnect failed created a fresh box and overwrote the handle, and the
+ * orphan kept renewing. It surfaced as `403 sandbox_gateway_ownership_denied` rather than a 404,
+ * because an orphan's routing is pinned to the channel its box was created on: same key, same box
+ * id, `200` on the public channel and `403` on internal. The gateway scopes ownership per channel
+ * and the superseded box was no longer that channel's — so the log accused the gateway while the
+ * fault was the missing detach. `detach()` stops the timer with no control-plane call, and is
+ * idempotent; re-installing the SAME handle must NOT detach it (that would stop the keepalive of
+ * the box currently in use).
+ */
+export function installHandle(
+  handles: Map<string, SandboxHandle>,
+  botId: string,
+  handle: SandboxHandle,
+): void {
+  const previous = handles.get(botId);
+  if (previous && previous !== handle) previous.detach();
+  handles.set(botId, handle);
+}
+
+/**
  * Hard ceiling on how long an entry may sit in the `#provisioning` dedupe map (ms). The
  * provider's own awaits are all bounded now (see `withTimeout` in core), so a provision/recover
  * settles well within this. This is defence-in-depth: if some future unbounded await slips in,
@@ -420,7 +447,7 @@ export class SandboxManager {
       meta: providerMeta as Record<string, unknown>,
     };
     const handle = await this.#provider.connect(req);
-    this.#handles.set(botId, handle);
+    this.#setHandle(botId, handle);
 
     // Persist refreshed routing if it moved (new clientId after resume, etc.).
     if (handle.providerSandboxId !== providerSandboxId) {
@@ -460,6 +487,21 @@ export class SandboxManager {
   /** The box-local MCP endpoints that came up for a bot (empty if none / not yet bootstrapped). */
   boxMcpEndpoints(botId: string): StartedBoxMcp[] {
     return this.#boxMcp.get(botId) ?? [];
+  }
+
+  /**
+   * Record the box-local MCP endpoints a bootstrap started outside this manager — specifically the
+   * incremental one a plugin install runs. Without this, a server started by an install wouldn't be
+   * dialable until the next full bootstrap, so a freshly-installed plugin's tools would be missing
+   * from the very next turn even though the process is up.
+   */
+  registerBoxMcp(botId: string, endpoints: StartedBoxMcp[]): void {
+    this.#boxMcp.set(botId, endpoints);
+  }
+
+  /** Install a bot's handle. The ONLY way to populate `#handles` — see `installHandle`. */
+  #setHandle(botId: string, handle: SandboxHandle): void {
+    installHandle(this.#handles, botId, handle);
   }
 
   /** Mark a bot's box dead: drop the handle, flip the row to `kill`, idle the bot. */
@@ -894,7 +936,7 @@ export class SandboxManager {
     };
     try {
       const handle = await this.#provider.create(req);
-      this.#handles.set(botId, handle);
+      this.#setHandle(botId, handle);
       await this.#db
         .update(sandboxes)
         .set({

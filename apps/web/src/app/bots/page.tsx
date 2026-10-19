@@ -6,6 +6,7 @@ import { Bot as BotIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { Bot } from "@i-bot/types";
 import { api, ApiError } from "@/lib/api";
+import { redirectToSignIn } from "@/lib/session";
 import { CreateBotDialog } from "@/components/CreateBotDialog";
 import { BotAvatarValue } from "@/lib/avatar";
 
@@ -19,7 +20,7 @@ export default function BotsPage() {
       .listBots()
       .then(setBots)
       .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) router.replace("/");
+        if (err instanceof ApiError && err.status === 401) redirectToSignIn();
       });
   }, [router]);
 

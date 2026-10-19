@@ -7,6 +7,13 @@
  *   2. POST /skills { botId, ...draft }          → publish the reviewed draft as a bot-scoped Skill.
  *   3. GET  /skills?botId= / DELETE /skills/:id   → list / remove a bot's skills.
  *
+ * And the HUMAN-session variant, for a person driving the desktop through noVNC (whose input leaves
+ * no tool trace — see agent/recording.ts):
+ *
+ *   4. POST /skills/recording/:botId/start|stop|status|discard → drive the on-box sampler.
+ *   5. POST /skills/recording/:botId/analyze → pull the frames back and distill them (owner's
+ *      vision model) into the same DRAFT shape; the client then reviews and publishes via step 2.
+ *
  * Isolation: every route resolves ownership through `bots.ownerId → session user` before touching
  * anything — a conversation via its bot, a skill via its bot-scoped ownerRef. requireAuth is mounted
  * upstream (see server.ts) so `userId` is always present.
@@ -19,8 +26,22 @@ import { z } from "zod";
 import type { AppBindings } from "../context.js";
 import { distillSkillDraft } from "../agent/distill.js";
 import { resolveModel } from "../agent/model.js";
+import {
+  discardRecording,
+  distillRecording,
+  pullRecording,
+  recordingStatus,
+  startRecording,
+  stopRecording,
+} from "../agent/recording.js";
 import { loadHistory, ownerCredentialFor } from "../agent/resolve.js";
 import { assertOwnerOfBot } from "../middleware/auth.js";
+import {
+  callableSkills,
+  dedupeSkillsByPrecedence,
+  resolvePluginsForBot,
+} from "../plugins/resolve.js";
+import { localPluginIdFor } from "../plugins/repository.js";
 
 /**
  * Config-driven failures for this router: one code → { status, message } table instead of scattering
@@ -39,6 +60,9 @@ const FAIL = {
   },
   nothing_to_analyze: { status: 422, message: "这段对话里没有可提炼的操作。" },
   analysis_failed: { status: 502, message: "分析失败,请重试。" },
+  sandbox_not_ready: { status: 409, message: "桌面还没启动,无法录制。" },
+  recorder_failed: { status: 502, message: "录制器没有响应,请重试。" },
+  empty_recording: { status: 422, message: "这段录制里没有可分析的操作。" },
 } as const;
 
 type FailCode = keyof typeof FAIL;
@@ -68,7 +92,8 @@ export const skillsRoutes = new Hono<AppBindings>()
       where: and(eq(skillsTable.scope, "bot"), eq(skillsTable.ownerRef, botId)),
       orderBy: [desc(skillsTable.createdAt)],
     });
-    return c.json({ skills: rows });
+    const resolved = await resolvePluginsForBot(db, botId);
+    return c.json({ skills: dedupeSkillsByPrecedence(callableSkills(rows, resolved), resolved) });
   })
 
   // ---------- analyze a conversation into a draft (no write) ----------
@@ -107,6 +132,82 @@ export const skillsRoutes = new Hono<AppBindings>()
     }
   })
 
+  // ---------- human-session recording (a person driving the desktop) ----------
+  // Start/stop/status/discard are thin shells over /opt/ibot-recorder.sh on the bot's box. They
+  // need a LIVE handle (an active sandbox) — 409 otherwise, same as chat does.
+  .post("/recording/:botId/:action{start|stop|status|discard}", async (c) => {
+    const botId = c.req.param("botId");
+    const action = c.req.param("action");
+    const owned = await assertOwnerOfBot(c, botId);
+    if (!owned) return fail(c, "not_found");
+
+    const { sandboxes: mgr } = c.get("ctx");
+    let handle;
+    try {
+      handle = await mgr.getHandle(botId);
+    } catch {
+      return fail(c, "sandbox_not_ready");
+    }
+    try {
+      switch (action) {
+        case "start": {
+          await startRecording(handle);
+          return c.json({ recording: true, frames: 0 });
+        }
+        case "stop": {
+          const { frames } = await stopRecording(handle);
+          return c.json({ recording: false, frames });
+        }
+        case "discard": {
+          await discardRecording(handle);
+          return c.json({ recording: false, frames: 0 });
+        }
+        default: {
+          return c.json(await recordingStatus(handle));
+        }
+      }
+    } catch (err) {
+      console.error(`[skills.recording.${action}]`, err);
+      return fail(c, "recorder_failed");
+    }
+  })
+
+  // Pull the recorded frames back from the box and distill them into a draft. Stops the recorder
+  // first if it's still running (pressing "analyze" IS the stop). The recording stays on the box
+  // until the client discards it (after publish/cancel) so a failed analysis can be retried.
+  .post("/recording/:botId/analyze", async (c) => {
+    const botId = c.req.param("botId");
+    const owned = await assertOwnerOfBot(c, botId);
+    if (!owned) return fail(c, "not_found");
+
+    const { db, sandboxes: mgr } = c.get("ctx");
+    const bot = await db.query.bots.findFirst({ where: eq(bots.id, botId) });
+    if (!bot) return fail(c, "not_found");
+    const credential = await ownerCredentialFor(db, bot.ownerId);
+    if (!credential) return fail(c, "no_model_key");
+
+    let handle;
+    try {
+      handle = await mgr.getHandle(botId);
+    } catch {
+      return fail(c, "sandbox_not_ready");
+    }
+    try {
+      await stopRecording(handle);
+      const rec = await pullRecording(handle);
+      if (rec.frames.length === 0) return fail(c, "empty_recording");
+      const model = resolveModel(credential, bot.model);
+      const draft = await distillRecording(model, rec);
+      return c.json({ draft, frames: rec.frames.length, durationMs: rec.durationMs });
+    } catch (err) {
+      if (err instanceof Error && err.message === "empty_recording") {
+        return fail(c, "empty_recording");
+      }
+      console.error("[skills.recording.analyze] distill failed", err);
+      return fail(c, "analysis_failed");
+    }
+  })
+
   // ---------- publish a reviewed draft as a bot skill ----------
   .post("/", async (c) => {
     const body = PublishBody.safeParse(await c.req.json().catch(() => ({})));
@@ -117,9 +218,22 @@ export const skillsRoutes = new Hono<AppBindings>()
     if (!owned) return fail(c, "not_found");
 
     const { db } = c.get("ctx");
+    // A published recording lands in the bot's `local` plugin, the same bundle `save_skill` writes
+    // to — so "record → experience" and "the agent learned it" produce one editable, exportable set.
+    // Null when the bot has no local plugin yet; the skill is still valid without one.
+    const pluginId = await localPluginIdFor(db, botId).catch(() => null);
     const [row] = await db
       .insert(skillsTable)
-      .values({ scope: "bot", ownerRef: botId, name, description, playbook, steps, secretRefs })
+      .values({
+        scope: "bot",
+        ownerRef: botId,
+        name,
+        description,
+        playbook,
+        steps,
+        secretRefs,
+        pluginId,
+      })
       .returning();
     return c.json({ skill: row }, 201);
   })

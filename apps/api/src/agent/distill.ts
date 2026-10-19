@@ -18,7 +18,7 @@ import { z } from "zod";
 
 /** The structured draft the model must return. Mirrors `SkillDraft` in @i-bot/types (kept local so
  * the generateObject schema is a plain zod object the SDK can drive without the branded re-exports). */
-const DraftSchema = z.object({
+export const DraftSchema = z.object({
   name: z
     .string()
     .min(1)

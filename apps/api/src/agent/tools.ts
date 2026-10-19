@@ -35,6 +35,7 @@ import {
 } from "../secrets/interpolate.js";
 import { resolveSecretValues } from "../secrets/vault.js";
 import { renderSkillFiles } from "../sandbox/bootstrap.js";
+import { localPluginIdFor } from "../plugins/repository.js";
 import { validateA2uiMessages } from "./a2ui-validate.js";
 
 /**
@@ -177,6 +178,37 @@ export interface SandboxTools {
 
 /** Which tools a run gets. `full` = the interactive/desktop set; `concurrent-safe` = shell only. */
 export type ToolMode = "full" | "concurrent-safe";
+
+/**
+ * The platform's own primitives — every tool `buildSandboxTools` can produce, with the note the UI
+ * and the plugin layer show for it. This is the vocabulary an agent's tool allowlist is validated
+ * against, and the content of the `@ibot/core` builtin plugin's `providedTools`.
+ *
+ * It lives HERE, next to the implementations, because it has to stay in step with them; a test
+ * asserts the two match, so adding a tool without listing it fails rather than drifting silently.
+ * Which of these a given run actually gets still depends on `mode` and what the caller wired
+ * (`spawnTask`, `onHandoff`, `tenant`).
+ */
+export const CORE_TOOLS: readonly { name: string; description: string }[] = [
+  {
+    name: "browser_action",
+    description: "Drive Chrome over CDP — the preferred path for web work.",
+  },
+  {
+    name: "desktop_action",
+    description: "Raw mouse/keyboard on the Linux desktop (the fallback).",
+  },
+  { name: "screenshot", description: "Capture the whole desktop as a PNG." },
+  {
+    name: "render_ui",
+    description: "Draw an interactive A2UI panel (the escape hatch for cards).",
+  },
+  { name: "run_command", description: "A root shell in the box — the one concurrency-safe tool." },
+  { name: "save_skill", description: "Record a reusable procedure into the bot's local plugin." },
+  { name: "bind_mcp", description: "Register a remote MCP server for this bot (next turn)." },
+  { name: "spawn_task", description: "Run independent work in the background and keep chatting." },
+  { name: "request_handoff", description: "Pause the turn for something only the human can do." },
+];
 
 export interface SandboxToolsOptions {
   /**
@@ -460,6 +492,11 @@ function buildSaveSkillTool(handle: SandboxHandle, tenant: TenantWiring) {
     // handed unparsed input (e.g. a direct call): `files.length` must never see `undefined`.
     async execute({ name, description, playbook, files = [], secretRefs = [] }) {
       try {
+        // Everything a bot records belongs to its `local` plugin — the one editable bundle, and what
+        // "export my experience as a plugin" later reads. Null when the bot has none yet (a bot that
+        // predates plugins, until the backfill runs): a skill without a plugin id is still a working
+        // skill, so this never blocks the save.
+        const pluginId = await localPluginIdFor(tenant.db, tenant.botId).catch(() => null);
         const [row] = await tenant.db
           .insert(skillsTable)
           .values({
@@ -470,6 +507,7 @@ function buildSaveSkillTool(handle: SandboxHandle, tenant: TenantWiring) {
             playbook,
             files,
             secretRefs,
+            pluginId,
           })
           .returning({ id: skillsTable.id });
         const skillId = row!.id;
@@ -552,6 +590,8 @@ function buildBindMcpTool(tenant: TenantWiring) {
           : {};
         const missing = refNames.filter((n) => !(n in present));
 
+        // Same as save_skill: a server the bot bound itself belongs to its `local` plugin.
+        const pluginId = await localPluginIdFor(tenant.db, tenant.botId).catch(() => null);
         const [row] = await tenant.db
           .insert(botMcpServers)
           .values({
@@ -562,6 +602,7 @@ function buildBindMcpTool(tenant: TenantWiring) {
             headers: headers ?? null,
             toolFilter: toolFilter ?? null,
             enabled: true,
+            pluginId,
           })
           .returning({ id: botMcpServers.id });
 
@@ -726,7 +767,8 @@ const renderUiTool = tool({
     "data that components bind to via {path:'/field'}.\n\n" +
     "Component prop contracts (basic catalog — schemas are STRICT, unknown props are rejected):\n" +
     "• Text {text, variant?} — variant ∈ h1|h2|h3|h4|h5|caption|body (NOT 'heading'/'title'). No " +
-    "'label'.\n" +
+    "'label'. `body` (the default) renders markdown — bold, lists, links, inline code — so a " +
+    "short formatted paragraph is one Text, not a Column of many.\n" +
     "• Button {child, variant?, action?} — `child` is the ID of a Text (or Icon) component for the " +
     "label; there is NO 'label' prop. variant ∈ default|primary|borderless.\n" +
     "• TextField {label, value?, variant?} — `value` binds via {path:'/field'}; variant ∈ " +

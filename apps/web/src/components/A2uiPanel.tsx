@@ -1,10 +1,11 @@
 "use client";
 
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
-import { A2uiSurface } from "@a2ui/react/v0_9";
+import { A2uiSurface, MarkdownContext } from "@a2ui/react/v0_9";
 import type { A2uiMessage } from "@i-bot/types";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { ibotCatalog, IBOT_CATALOG_ID } from "@/components/a2ui-catalog";
+import { renderA2uiMarkdown } from "@/lib/a2ui-markdown";
 
 /**
  * Build a `MessageProcessor` bound to our single catalog. Factored out so the processor's exact
@@ -106,6 +107,8 @@ export function A2uiPanel({
         },
   );
   const { processor, fed } = shared ?? fallback!;
+  const rootRef = useRef<HTMLDivElement>(null);
+  useRangeFill(rootRef);
 
   // The surfaces THIS part owns = the ones it creates. Delta-only parts own none.
   const ownedIds = messages
@@ -149,12 +152,70 @@ export function A2uiPanel({
   if (surfaces.length === 0) return null;
 
   return (
-    <div className="a2ui-panel">
-      {surfaces.map((surface) => (
-        <A2uiSurface key={surface.id} surface={surface} />
-      ))}
-    </div>
+    // MarkdownContext: Text's `body` variant renders markdown through this (sanitised HTML string);
+    // without it the package shows the raw syntax. Provided at the panel, so the no-provider
+    // fallback path gets it too.
+    <MarkdownContext.Provider value={renderA2uiMarkdown}>
+      <div className="a2ui-panel" ref={rootRef} onClick={openLinksInNewTab}>
+        {surfaces.map((surface) => (
+          <A2uiSurface key={surface.id} surface={surface} />
+        ))}
+      </div>
+    </MarkdownContext.Provider>
   );
+}
+
+/**
+ * A link inside a panel must not navigate the chat away. The sanitiser strips `target`, so instead
+ * of per-link attributes one delegated handler opens any panel link in a new tab (noopener so the
+ * page can't reach back).
+ */
+function openLinksInNewTab(e: React.MouseEvent<HTMLDivElement>) {
+  const a = (e.target as HTMLElement).closest("a[href]");
+  if (!(a instanceof HTMLAnchorElement)) return;
+  e.preventDefault();
+  window.open(a.href, "_blank", "noopener,noreferrer");
+}
+
+/** A Slider's accent-filled share of its track, as a CSS percentage of value within [min, max]. */
+function rangeFillPercent(el: HTMLInputElement): string {
+  const min = Number(el.min) || 0;
+  const max = Number(el.max) || 100;
+  const v = Number(el.value) || 0;
+  const pct = max > min ? ((v - min) / (max - min)) * 100 : 0;
+  return `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+/**
+ * Keep `--a2ui-range-fill` in step with every `<input type=range>` under `root`. CSS can't read a
+ * range's value, and the package's Slider is a black box we don't fork, so the panel root does it:
+ * one delegated `input` listener paints during a drag; a `MutationObserver` sweep catches sliders
+ * that mount later or whose value the data model rewrites (a `render_ui` delta) without user input.
+ * React updates a controlled range via the `value` PROPERTY (no attribute mutation), so the sweep
+ * keys on childList changes and re-runs on every render of the owner too.
+ */
+function useRangeFill(rootRef: React.RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const paint = (el: HTMLInputElement) =>
+      el.style.setProperty("--a2ui-range-fill", rangeFillPercent(el));
+    const sweep = () => {
+      for (const el of root.querySelectorAll<HTMLInputElement>('input[type="range"]')) paint(el);
+    };
+    const onInput = (e: Event) => {
+      const t = e.target;
+      if (t instanceof HTMLInputElement && t.type === "range") paint(t);
+    };
+    root.addEventListener("input", onInput);
+    const mo = new MutationObserver(sweep);
+    mo.observe(root, { childList: true, subtree: true });
+    sweep();
+    return () => {
+      root.removeEventListener("input", onInput);
+      mo.disconnect();
+    };
+  });
 }
 
 /**

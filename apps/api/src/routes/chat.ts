@@ -29,7 +29,8 @@ import {
   messages as messagesTable,
   userModelCredentials,
 } from "@i-bot/db";
-import type { MessagePart } from "@i-bot/types";
+import { skillCommandFromParts, type MessagePart } from "@i-bot/types";
+import { commandSkill, resolvePluginsForBot } from "../plugins/resolve.js";
 import { type UIMessage, validateUIMessages } from "ai";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -241,6 +242,17 @@ export const chatRoutes = new Hono<AppBindings>()
     const parsed = SendMessage.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "invalid body", issues: parsed.error.issues }, 400);
 
+    const skillCommand = skillCommandFromParts(parsed.data.parts);
+    if (
+      skillCommand &&
+      !commandSkill(await resolvePluginsForBot(ctx.db, owned.botId), skillCommand)
+    ) {
+      return c.json(
+        { error: "command_unavailable", message: `/${skillCommand} 对应的插件尚未安装或已停用。` },
+        400,
+      );
+    }
+
     const resolved = await resolveTurn(c, owned.botId);
     if (!resolved.ok) return resolved.res;
     const { turn } = resolved;
@@ -266,7 +278,9 @@ export const chatRoutes = new Hono<AppBindings>()
     publishRunState(ctx, owned.botId, conversationId);
 
     return runAgentStream({
+      automationActions: ctx.automations?.forAgent(c.get("userId"), owned.botId, conversationId),
       credential: turn.credential,
+      imageStorage: ctx.storage,
       db: ctx.db,
       handle: turn.handle,
       botId: owned.botId,
@@ -275,6 +289,7 @@ export const chatRoutes = new Hono<AppBindings>()
       modelId: turn.modelId,
       temperature: turn.temperature,
       history,
+      skillCommand,
       mode: "full",
       // the bot's box-local MCP endpoints (started by bootstrap) so the run can dial them
       boxMcpEndpoints: ctx.sandboxes.boxMcpEndpoints(owned.botId),
@@ -294,6 +309,7 @@ export const chatRoutes = new Hono<AppBindings>()
           goal,
           run: {
             credential: turn.credential,
+            imageStorage: ctx.storage,
             db: ctx.db,
             handle: turn.handle,
             botId: owned.botId,
@@ -303,6 +319,7 @@ export const chatRoutes = new Hono<AppBindings>()
             temperature: turn.temperature,
             boxMcpEndpoints: ctx.sandboxes.boxMcpEndpoints(owned.botId),
             logger: ctx.logger,
+            skillCommand,
             // a self-contained subagent: seed it with just its goal (its steps stay off-transcript)
             history: [
               { id: randomUUID(), role: "user", parts: [{ type: "text", text: goal }] },
@@ -358,6 +375,12 @@ export const chatRoutes = new Hono<AppBindings>()
     }
 
     const parts = parsed.data.parts as MessagePart[];
+    if (skillCommandFromParts(parts)) {
+      return c.json(
+        { error: "command_requires_new_turn", message: "请先停止当前任务，再调用插件。" },
+        400,
+      );
+    }
     const text = instructionFromParts(parts);
     if (!text) return c.json({ error: "empty", message: "消息为空" }, 400);
 
@@ -402,6 +425,7 @@ export const chatRoutes = new Hono<AppBindings>()
       goal: instructionFromParts(parts),
       run: {
         credential: turn.credential,
+        imageStorage: ctx.storage,
         db: ctx.db,
         handle: turn.handle,
         botId: owned.botId,

@@ -12,18 +12,27 @@
 import type { Database } from "@i-bot/db";
 import { skills as skillsTable } from "@i-bot/db";
 import type { Skill } from "@i-bot/types";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { skillDir } from "../sandbox/bootstrap.js";
 
-/** Load the skills applicable to a bot: its own bot-scoped skills plus public ones. */
-export async function loadBotSkills(db: Database, botId: string): Promise<Skill[]> {
+/** A loaded skill row, plus the plugin it was expanded from (null for a row that predates plugins). */
+export type LoadedSkill = Skill & { pluginId: string | null };
+
+/**
+ * Load the skills applicable to a bot: exactly its own, `scope='bot' AND ownerRef=botId`.
+ *
+ * This predicate is the tenant boundary, so it stays a single AND with no OR branch. It previously
+ * also loaded every `scope='public'` row — and `public` has no owner column, so any such row would
+ * have been readable by every tenant's bots. Nothing wrote those rows, so nothing leaked, but the
+ * plugin layer is about to expand shared capability into per-bot rows, and a shared-scope shortcut
+ * would have turned that into a real cross-tenant read. "Public" now lives one level up, as a
+ * `builtin` plugin whose skills are materialized per bot (each row owned, each row filtered here).
+ */
+export async function loadBotSkills(db: Database, botId: string): Promise<LoadedSkill[]> {
   const rows = await db.query.skills.findMany({
-    where: or(
-      and(eq(skillsTable.scope, "bot"), eq(skillsTable.ownerRef, botId)),
-      eq(skillsTable.scope, "public"),
-    ),
+    where: and(eq(skillsTable.scope, "bot"), eq(skillsTable.ownerRef, botId)),
   });
-  return rows as unknown as Skill[];
+  return rows as unknown as LoadedSkill[];
 }
 
 /**

@@ -5,6 +5,12 @@
  * UI can branch (401 → login, 409 → sandbox not ready, 503 → model unconfigured).
  */
 import type {
+  Automation,
+  AutomationDefinition,
+  AutomationPatch,
+  AutomationRun,
+  AutomationKey,
+  AutomationAttention,
   AgentJob,
   Bot,
   Conversation,
@@ -13,8 +19,10 @@ import type {
   ModelCredentialsView,
   ModelInfo,
   Skill,
+  SkillListItem,
   SkillDraft,
 } from "@i-bot/types";
+import { redirectToSignIn } from "./session";
 
 export type { ConversationEvent };
 
@@ -44,8 +52,21 @@ export class ApiError extends Error {
   }
 }
 
+/** Shared by JSON requests and the chat transport. Provider/login errors must not sign us out. */
+export const sessionFetch: typeof fetch = async (input, init) => {
+  const res = await fetch(input, init);
+  if (res.status === 401) {
+    const body = await res
+      .clone()
+      .json()
+      .catch(() => null);
+    if (body?.error === "unauthenticated") redirectToSignIn();
+  }
+  return res;
+};
+
 async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await sessionFetch(`${API_URL}${path}`, {
     credentials: "include",
     ...init,
     headers: { "content-type": "application/json", ...(init.headers ?? {}) },
@@ -91,6 +112,33 @@ export interface SessionUser {
 }
 
 export const api = {
+  automationAttention: (botId: string) =>
+    req<AutomationAttention>(`/api/automations/bots/${botId}/attention`),
+  listAutomations: (botId: string) => req<Automation[]>(`/api/automations/bots/${botId}`),
+  createAutomation: (botId: string, data: AutomationDefinition) =>
+    req<Automation>(`/api/automations/bots/${botId}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateAutomation: (id: string, data: AutomationPatch) =>
+    req<Automation>(`/api/automations/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteAutomation: (id: string) => req<void>(`/api/automations/${id}`, { method: "DELETE" }),
+  automationKey: (id: string, kind: "webhook" | "callback") =>
+    req<AutomationKey>(`/api/automations/${id}/keys/${kind}`, { method: "POST" }),
+  automationRuns: (id: string) => req<AutomationRun[]>(`/api/automations/${id}/runs`),
+  testAutomation: (id: string) =>
+    req<{ runId: string; status: string }>(`/api/automations/${id}/test`, { method: "POST" }),
+  automationRunAction: (
+    id: string,
+    runId: string,
+    action: "cancel" | "resume" | "read",
+    message?: string,
+  ) =>
+    req<void>(`/api/automations/${id}/runs/${runId}/${action}`, {
+      method: "POST",
+      body: message ? JSON.stringify({ message }) : undefined,
+    }),
+
   base: API_URL,
 
   async signUp(email: string, password: string, name: string): Promise<void> {
@@ -209,6 +257,20 @@ export const api = {
       })
     ).draft;
   },
+  // ---------- human-session recording → skill ----------
+  /** Drive the on-box recorder while a person holds the desktop. */
+  async recording(
+    botId: string,
+    action: "start" | "stop" | "status" | "discard",
+  ): Promise<{ recording: boolean; frames: number }> {
+    return req(`/api/skills/recording/${botId}/${action}`, { method: "POST", body: "{}" });
+  },
+  /** Stop (if needed), pull the frames back and distill them into a reviewable draft. */
+  async analyzeRecording(
+    botId: string,
+  ): Promise<{ draft: SkillDraft; frames: number; durationMs: number }> {
+    return req(`/api/skills/recording/${botId}/analyze`, { method: "POST", body: "{}" });
+  },
   /** Publish a reviewed draft as a bot-scoped skill. */
   async saveSkill(botId: string, draft: SkillDraft): Promise<Skill> {
     return (
@@ -218,8 +280,8 @@ export const api = {
       })
     ).skill;
   },
-  async listSkills(botId: string): Promise<Skill[]> {
-    return (await req<{ skills: Skill[] }>(`/api/skills?botId=${botId}`)).skills;
+  async listSkills(botId: string): Promise<SkillListItem[]> {
+    return (await req<{ skills: SkillListItem[] }>(`/api/skills?botId=${botId}`)).skills;
   },
   async deleteSkill(skillId: string): Promise<void> {
     await req(`/api/skills/${skillId}`, { method: "DELETE" });

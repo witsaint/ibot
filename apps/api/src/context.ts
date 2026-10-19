@@ -10,6 +10,7 @@ import { createLogger, type Logger } from "@i-bot/logger";
 import { Storage } from "@i-bot/storage";
 import type { ApiEnv } from "./env.js";
 import { hasStorage } from "./env.js";
+import { AutomationManager } from "./automations/manager.js";
 import { JobManager } from "./agent/jobs.js";
 import { ConversationEventBus } from "./events/bus.js";
 import { SandboxManager } from "./sandbox/manager.js";
@@ -23,6 +24,7 @@ export interface AppContext {
   sandboxConfig: SandboxConfig;
   sandboxes: SandboxManager;
   jobs: JobManager;
+  automations: AutomationManager;
   /** in-process per-conversation SSE event bus (task/run lifecycle notifications) */
   events: ConversationEventBus;
 }
@@ -62,5 +64,10 @@ export function buildContext(env: ApiEnv): AppContext {
   const events = new ConversationEventBus();
   const jobs = new JobManager({ db, logger, sandboxes, events });
 
-  return { env, logger, db, auth, storage, sandboxConfig, sandboxes, jobs, events };
+  const automations = new AutomationManager({
+    ctx: { db, sandboxes, events, logger, storage },
+    apiOrigin: env.BETTER_AUTH_URL,
+    onReleased: (botId, conversationId) => jobs.flushPendingRelay(botId, conversationId),
+  });
+  return { env, logger, db, auth, storage, sandboxConfig, sandboxes, jobs, events, automations };
 }

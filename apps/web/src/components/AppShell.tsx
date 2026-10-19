@@ -8,6 +8,8 @@ import type { Bot } from "@i-bot/types";
 import { api, ApiError } from "@/lib/api";
 import { CreateBotDialog } from "@/components/CreateBotDialog";
 import { AnimatedLogo } from "@/components/AnimatedLogo";
+import { SessionMonitor } from "@/components/SessionMonitor";
+import { isProtectedPage } from "@/lib/session";
 import { AvatarShades, BotAvatarValue } from "@/lib/avatar";
 
 /**
@@ -32,6 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: "flex", height: "100vh", minHeight: 0 }}>
+      {isProtectedPage(pathname) && <SessionMonitor />}
       <BotRail pathname={pathname} />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {children}

@@ -10,6 +10,7 @@ import {
 } from "ai";
 import {
   ArrowUp,
+  BookOpen,
   Camera,
   Check,
   Film,
@@ -18,21 +19,36 @@ import {
   Loader2,
   Minus,
   Monitor,
+  Paperclip,
+  Plug,
   Plus,
   Square,
   Terminal,
   X,
 } from "lucide-react";
-import type { Skill, SkillDraft, UiEventData } from "@i-bot/types";
-import { UI_EVENT_PART_TYPE, uiEventInstruction } from "@i-bot/types";
+import type { SkillListItem, SkillDraft, UiEventData, WebPreview } from "@i-bot/types";
+import {
+  UI_EVENT_PART_TYPE,
+  uiEventInstruction,
+  skillCommandFromParts,
+  webPreviewsFromMessages,
+} from "@i-bot/types";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkDirective from "remark-directive";
 import remarkGfm from "remark-gfm";
 import type { A2uiMessage, Message } from "@i-bot/types";
-import { api, ApiError, type ConversationEvent, type RunStateView } from "@/lib/api";
+import { api, ApiError, sessionFetch, type ConversationEvent, type RunStateView } from "@/lib/api";
+import { type AvatarConfig, parseAvatar } from "@/lib/avatar";
 import { errorText } from "@/lib/errors";
+import { remarkTags, tagComponents } from "@/lib/markdown-tags";
 import { type A2uiAction, A2uiPanel, A2uiRuntimeProvider } from "@/components/A2uiPanel";
+import { SkillReviewDialog } from "@/components/SkillReviewDialog";
+import { Chip, toChipTone } from "@/components/ui/Chip";
+import { ComposerMenu, type ComposerMenuGroup } from "@/components/ui/ComposerMenu";
+import { LoadingStatus } from "@/components/ui/LoadingStatus";
+import { WalkingBot } from "@/components/ui/WalkingBot";
 
 /** A detached task shown in the status strip, tracked from the SSE task lifecycle events. */
 interface TaskCard {
@@ -63,17 +79,25 @@ export function ChatPanel({
   conversationId,
   initialMessages,
   desktopActive,
+  avatar,
+  onWebPreviewsChange,
 }: {
   botId: string;
   conversationId: string;
   initialMessages: UIMessage[];
   desktopActive: boolean;
+  /** the bot's stored avatar value; when it parses to an AvatarConfig the wait state shows the
+   *  bot's own character walking, otherwise the pixel-grid loader */
+  avatar?: string | null;
+  onWebPreviewsChange?: (previews: WebPreview[]) => void;
 }) {
+  const avatarConfig: AvatarConfig | null = parseAvatar(avatar);
   const transport = useMemo(
     () =>
       new DefaultChatTransport<UIMessage>({
         api: api.chatEndpoint(conversationId),
         credentials: "include",
+        fetch: sessionFetch,
         // The server owns history: it persists the user message then re-reads the thread.
         // So we send only the newest message's parts as `{ parts }`.
         prepareSendMessagesRequest: ({ messages }) => {
@@ -93,6 +117,45 @@ export function ChatPanel({
   // Files staged for the next send (images/videos), as data-URL file parts. The user attaches
   // them with "+"; the agent decides what to do with them — no mode to pick.
   const [attachments, setAttachments] = useState<FileUIPart[]>([]);
+  // The composer is a single pill row until the draft wraps or a file is staged; then it opens to
+  // two rows (field above, controls below) and its corners relax from full-round to a card radius.
+  const [multiline, setMultiline] = useState(false);
+  const composerOpen = multiline || attachments.length > 0;
+  // The "+" menu: attachments, record-a-skill, saved skills, plugins. Skills are fetched lazily
+  // the first time it opens (they change rarely; a save re-fetches via the review dialog's onSaved).
+  const webPreviews = useMemo(() => webPreviewsFromMessages(messages), [messages]);
+  const deliveredPreviews = useRef<{
+    signature: string;
+    callback: typeof onWebPreviewsChange;
+  } | null>(null);
+  useEffect(() => {
+    const signature = JSON.stringify(webPreviews);
+    if (
+      deliveredPreviews.current?.signature === signature &&
+      deliveredPreviews.current?.callback === onWebPreviewsChange
+    ) {
+      return;
+    }
+    deliveredPreviews.current = { signature, callback: onWebPreviewsChange };
+    onWebPreviewsChange?.(webPreviews);
+  }, [webPreviews, onWebPreviewsChange]);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [skills, setSkills] = useState<SkillListItem[] | null>(null);
+  useEffect(() => {
+    if (!menuOpen || skills !== null) return;
+    void api
+      .listSkills(botId)
+      .then(setSkills)
+      .catch(() => setSkills([]));
+  }, [menuOpen, skills, botId]);
+  // A skill recorded from the desktop panel (or saved anywhere else) invalidates the cached list so
+  // the next menu open shows it.
+  useEffect(() => {
+    const onChanged = () => setSkills(null);
+    window.addEventListener("ibot:skills-changed", onChanged);
+    return () => window.removeEventListener("ibot:skills-changed", onChanged);
+  }, []);
   // Detached tasks (agent-spawned subagents + human background jobs) the bot is running alongside
   // the chat, driven by the SSE stream. A finished/errored card lingers briefly then removes
   // itself; the actual result arrives in the transcript via `message.ready`.
@@ -125,6 +188,8 @@ export function ChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Per-task removal timers for finished/errored cards, so they clear after their brief display.
   const cardTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -331,6 +396,10 @@ export function ChatPanel({
     // next fresh turn. Falls back to a normal send if the server says the run just ended (409).
     // Background tasks alone don't gate this — a send then just starts a fresh foreground turn.
     if (foregroundLive) {
+      if (skillCommandFromParts([{ type: "text", text }])) {
+        setJobError("请先停止当前任务，再调用插件。");
+        return;
+      }
       if (!text) return; // nothing to steer with (attachments can't steer) — keep them staged
       setInput("");
       void steer(text);
@@ -361,6 +430,117 @@ export function ChatPanel({
       setAnalyzing(false);
     }
   }, [conversationId]);
+
+  // What the "+" menu offers, in three groups. "添加" is the built-ins; "技能" is the bot's own
+  // saved skills (a pick inserts a reference the model reads as "use this playbook"); "插件" is
+  // the integration slot — GitHub / GitLab / internal tools land here as MCP servers get a list
+  // endpoint. Until then they're shown disabled so the shape of the menu is already right.
+  const composerMenuGroups: ComposerMenuGroup[] = useMemo(() => {
+    const groups: ComposerMenuGroup[] = [
+      {
+        key: "add",
+        title: "添加",
+        items: [
+          {
+            key: "attach",
+            label: "附件",
+            desc: "上传图片或视频",
+            icon: <Paperclip size={13} strokeWidth={1.8} />,
+            disabled: !desktopActive,
+            hint: desktopActive ? undefined : "需先启动桌面",
+          },
+          {
+            key: "record-skill",
+            label: "录制技能",
+            desc: "把这次对话提炼成可复用的经验",
+            icon: <GraduationCap size={13} strokeWidth={1.8} />,
+            disabled: analyzing || messages.length === 0,
+            hint: messages.length === 0 ? "对话后可用" : undefined,
+          },
+        ],
+      },
+    ];
+    if (skills === null || skills.some((sk) => !sk.command)) {
+      groups.push({
+        key: "skills",
+        title: "技能",
+        items:
+          skills === null
+            ? [{ key: "skills-loading", label: "加载中…", disabled: true }]
+            : skills
+                .filter((sk) => !sk.command)
+                .map((sk) => ({
+                  key: `skill:${sk.id}`,
+                  label: sk.name,
+                  desc: sk.description,
+                  icon: <BookOpen size={13} strokeWidth={1.8} />,
+                })),
+      });
+    }
+    groups.push({
+      key: "plugins",
+      title: "插件",
+      items: [
+        ...(skills ?? [])
+          .filter((sk) => sk.command)
+          .map((sk) => ({
+            key: `skill:${sk.id}`,
+            label: sk.name,
+            desc: `/${sk.command} · ${sk.description}`,
+            icon: <Plug size={13} strokeWidth={1.8} />,
+            disabled: foregroundLive || !desktopActive,
+            hint: foregroundLive ? "请先停止当前任务" : !desktopActive ? "需先启动桌面" : undefined,
+          })),
+        {
+          key: "plugin:github",
+          label: "GitHub",
+          desc: "Issues、PR、代码检索",
+          icon: <Plug size={13} strokeWidth={1.8} />,
+          disabled: true,
+          hint: "即将支持",
+        },
+        {
+          key: "plugin:gitlab",
+          label: "GitLab",
+          desc: "内部仓库与流水线",
+          icon: <Plug size={13} strokeWidth={1.8} />,
+          disabled: true,
+          hint: "即将支持",
+        },
+      ],
+    });
+    return groups;
+  }, [desktopActive, analyzing, messages.length, skills, foregroundLive]);
+
+  const onMenuPick = useCallback(
+    (key: string) => {
+      setMenuOpen(false);
+      if (key === "attach") {
+        fileRef.current?.click();
+        return;
+      }
+      if (key === "record-skill") {
+        void analyzeSkill();
+        return;
+      }
+      if (key.startsWith("skill:")) {
+        // Manual entries insert a command prefix; automatic entries insert a normal skill reference.
+        const sk = skills?.find((x) => `skill:${x.id}` === key);
+        if (sk?.command) {
+          setInput((prev) => `/${sk.command} ${prev.replace(/^\/[a-z][a-z0-9-]*(?:\s|$)/, "")}`);
+          inputRef.current?.focus();
+          return;
+        }
+        if (sk) {
+          setInput(
+            (prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}用「${sk.name}」这个技能:`,
+          );
+          inputRef.current?.focus();
+        }
+      }
+    },
+    [analyzeSkill, skills],
+  );
 
   /**
    * A user interacted with a bot-rendered A2UI panel (clicked a button, submitted a form). Feed
@@ -448,8 +628,48 @@ export function ChatPanel({
     [conversationId],
   );
 
+  // Two separate concerns, deliberately kept apart so neither can feed back into the other:
+  //
+  // 1) WHICH layout (compact pill vs. two-row) — state, decided from the text alone by probing at
+  //    the COMPACT width (see needsOpenLayout). The answer does not depend on the layout it
+  //    produces, so it can never oscillate. `composerOpen` is read only to know how to find the
+  //    compact width from the current DOM; the effect keys on the text and the panel size.
+  const composerOpenRef = useRef(composerOpen);
+  composerOpenRef.current = composerOpen;
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const decide = () => setMultiline(needsOpenLayout(el, !composerOpenRef.current));
+    decide();
+    const panel = panelRef.current;
+    if (!panel || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(decide);
+    ro.observe(panel);
+    return () => ro.disconnect();
+  }, [input]);
+
+  // 2) HOW TALL — pure DOM writes, no state. Re-fit after every render that can change the field's
+  //    size: the text, the open/compact swap (which changes padding, so a fit taken in onChange —
+  //    BEFORE that re-render — is stale by one frame: the "two lines but still one line tall" bug),
+  //    attachment chips (they take footer space), and any panel resize. Layout effect so it lands
+  //    before paint — no flash of the wrong height.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const fit = () => fitComposer(el, panelRef.current, footerRef.current);
+    fit();
+    const panel = panelRef.current;
+    if (!panel || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(panel);
+    return () => ro.disconnect();
+  }, [input, composerOpen, attachments.length]);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: 0 }}>
+    <div
+      ref={panelRef}
+      style={{ display: "flex", flexDirection: "column", height: "100%", minWidth: 0 }}
+    >
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -490,6 +710,22 @@ export function ChatPanel({
                   }
                 />
               ))}
+              {/* The wait between sending and the first visible reply. Shown while streaming and
+                  the live assistant turn hasn't said anything yet (tool calls without prose still
+                  count as "nothing to read"). The bot's own character does the waiting when it has
+                  an avatar config; a plain pixel grid otherwise. Disappears the moment text lands. */}
+              {streaming && !liveTurnHasText(messages) && (
+                <LoadingStatus
+                  label="思考中"
+                  leading={
+                    avatarConfig ? (
+                      <WalkingBot config={avatarConfig} height={40} title="bot 正在处理" />
+                    ) : (
+                      "grid"
+                    )
+                  }
+                />
+              )}
             </div>
           </A2uiRuntimeProvider>
         )}
@@ -533,172 +769,185 @@ export function ChatPanel({
         )}
       </div>
 
-      <div style={{ flex: "none", padding: 12 }}>
-        <form
-          onSubmit={submit}
-          className="composer"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 8,
-            borderRadius: "var(--radius-md)",
-            border: "1px solid var(--border-strong)",
-            background: "var(--surface)",
-            transition: "border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease)",
-          }}
-        >
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              autoGrow(e.target);
-            }}
-            onKeyDown={(e) => {
-              // Enter sends; Shift+Enter is a newline (assistant-ui / shadcn convention).
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                submit(e);
-              }
-            }}
-            rows={1}
-            placeholder={
-              !desktopActive
-                ? "Start the desktop first…"
-                : foregroundLive
-                  ? "Add something mid-task — it steers the bot…"
-                  : "Message the bot…"
-            }
-            disabled={!desktopActive}
-            style={{
-              width: "100%",
-              resize: "none",
-              border: 0,
-              outline: "none",
-              background: "transparent",
-              color: "var(--ink)",
-              font: "inherit",
-              fontSize: 13.5,
-              lineHeight: 1.55,
-              padding: "4px 6px",
-              maxHeight: 160,
-              overflowY: "auto",
-            }}
-          />
-          {attachments.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 2px" }}>
-              {attachments.map((a, i) => (
-                <AttachmentChip
-                  key={`${a.filename ?? "file"}-${i}`}
-                  part={a}
-                  onRemove={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
-                />
-              ))}
-            </div>
+      <div ref={footerRef} style={{ flex: "none", padding: 12 }}>
+        <div data-composer-anchor style={{ position: "relative" }}>
+          {menuOpen && (
+            <ComposerMenu
+              groups={composerMenuGroups}
+              onPick={onMenuPick}
+              onClose={() => setMenuOpen(false)}
+              footer="↑↓ 选择 · Enter 确认 · Esc 关闭"
+            />
           )}
-          <div
+          <form
+            onSubmit={submit}
+            className="composer"
             style={{
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
+              flexDirection: "column",
+              gap: composerOpen ? 6 : 0,
+              padding: 6,
+              // Pill at rest; relaxes to a card radius once it opens (a 999px radius on a tall box
+              // reads as a capsule, not a composer).
+              borderRadius: composerOpen ? 20 : 999,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              boxShadow: "var(--shadow-sm)",
+              transition:
+                "border-color var(--dur) var(--ease), border-radius var(--dur) var(--ease), box-shadow var(--dur) var(--ease)",
             }}
           >
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*,video/*"
-              multiple
-              hidden
-              onChange={(e) => {
-                void onPickFiles(e.target.files);
-                e.target.value = ""; // let the same file be picked again later
+            {attachments.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "4px 6px 0" }}>
+                {attachments.map((a, i) => (
+                  <AttachmentChip
+                    key={`${a.filename ?? "file"}-${i}`}
+                    part={a}
+                    onRemove={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                  />
+                ))}
+              </div>
+            )}
+            {/* Compact: [+] [field] [stop?] [send] on one row. Open: the field takes the full width
+              and the controls drop to their own row beneath it. Same nodes both ways — only the
+              wrapping changes, so focus and the textarea's height are never disturbed. */}
+            <div
+              style={{
+                display: "flex",
+                flexWrap: composerOpen ? "wrap" : "nowrap",
+                alignItems: "flex-end",
+                gap: 4,
               }}
-            />
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={!desktopActive}
-                title="添加图片或视频"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 30,
-                  height: 30,
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border)",
-                  background: "transparent",
-                  color: desktopActive ? "var(--ink-secondary)" : "var(--ink-muted)",
-                  cursor: desktopActive ? "pointer" : "not-allowed",
+            >
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void onPickFiles(e.target.files);
+                  e.target.value = ""; // let the same file be picked again later
                 }}
-              >
-                <Plus size={16} strokeWidth={2} />
-              </button>
-              {/* "Record → experience": distill this conversation into a reusable skill. Enabled
-                  whenever there's a transcript (analysis reads history — no live desktop needed). */}
-              <button
-                type="button"
-                onClick={() => void analyzeSkill()}
-                disabled={analyzing || messages.length === 0}
-                title="把这次对话提炼成一个可复用的经验(skill)"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 5,
-                  height: 30,
-                  padding: "0 10px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border)",
-                  background: "transparent",
-                  color: messages.length === 0 ? "var(--ink-muted)" : "var(--ink-secondary)",
-                  fontSize: 12.5,
-                  cursor: analyzing || messages.length === 0 ? "not-allowed" : "pointer",
-                }}
-              >
-                {analyzing ? (
-                  <Loader2 size={13} strokeWidth={2.2} className="spin" />
-                ) : (
-                  <GraduationCap size={14} strokeWidth={2} />
-                )}
-                {analyzing ? "分析中…" : "生成经验"}
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {/* Stop only halts OUR live stream. A proactive relay turn (server-driven) can't be
-                  stopped from here; detached tasks are stopped from their own cards instead. */}
-              {streaming && (
-                <button
-                  type="button"
-                  onClick={() => stop()}
-                  title="停止"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    height: 30,
-                    padding: "0 11px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border)",
-                    background: "transparent",
-                    color: "var(--ink-secondary)",
-                    fontSize: 12.5,
-                    cursor: "pointer",
-                  }}
-                >
-                  <Square size={12} strokeWidth={2.2} fill="currentColor" />
-                  停止
-                </button>
-              )}
-              <SendButton
-                disabled={!desktopActive || (!input.trim() && attachments.length === 0)}
-                mode={foregroundLive ? "steer" : "send"}
               />
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter sends; Shift+Enter is a newline (assistant-ui / shadcn convention).
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    submit(e);
+                  }
+                }}
+                rows={1}
+                placeholder={
+                  !desktopActive
+                    ? "Start the desktop first…"
+                    : foregroundLive
+                      ? "Add something mid-task — it steers the bot…"
+                      : "Message the bot…"
+                }
+                disabled={!desktopActive}
+                style={{
+                  // open: the field is the whole first row; compact: it sits between the controls
+                  order: composerOpen ? 0 : 1,
+                  flex: composerOpen ? "1 1 100%" : "1 1 auto",
+                  minWidth: 0,
+                  resize: "none",
+                  border: 0,
+                  outline: "none",
+                  background: "transparent",
+                  color: "var(--ink)",
+                  font: "inherit",
+                  fontSize: "var(--text-body)",
+                  lineHeight: 1.55,
+                  padding: composerOpen ? "6px 8px 2px" : "4px 6px",
+                  // height / max / overflow are owned by fitComposer (measured against the panel),
+                  // not fixed here: the cap is "whatever the thread can spare", not a magic number.
+                  overflowY: "hidden",
+                }}
+              />
+              {/* left: the "+" that opens the grouped menu (attachments, record a skill, saved
+                skills, plugins). Everything that used to be a separate button lives in there. */}
+              <div
+                style={{
+                  order: composerOpen ? 1 : 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 2,
+                  flex: composerOpen ? "1 1 auto" : "none",
+                }}
+              >
+                <ComposerIconButton
+                  onClick={() => setMenuOpen((o) => !o)}
+                  disabled={!desktopActive && messages.length === 0}
+                  title="添加附件、技能或插件"
+                  active={menuOpen}
+                >
+                  <Plus
+                    size={16}
+                    strokeWidth={2}
+                    style={{
+                      transition: "transform var(--dur) var(--ease)",
+                      transform: menuOpen ? "rotate(45deg)" : "none",
+                    }}
+                  />
+                </ComposerIconButton>
+                {analyzing && (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontSize: "var(--text-caption)",
+                      color: "var(--ink-muted)",
+                      paddingLeft: 4,
+                    }}
+                  >
+                    <Loader2 size={12} strokeWidth={2.2} className="spin" />
+                    分析对话中…
+                  </span>
+                )}
+              </div>
+              {/* right controls: stop (while streaming), send */}
+              <div
+                style={{ order: 2, display: "flex", alignItems: "center", gap: 4, flex: "none" }}
+              >
+                {/* Stop only halts OUR live stream. A proactive relay turn (server-driven) can't be
+                  stopped from here; detached tasks are stopped from their own cards instead. */}
+                {streaming && (
+                  <button
+                    type="button"
+                    onClick={() => stop()}
+                    title="停止"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      height: 28,
+                      padding: "0 10px",
+                      borderRadius: 999,
+                      border: "1px solid var(--border)",
+                      background: "transparent",
+                      color: "var(--ink-secondary)",
+                      fontSize: "var(--text-label)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Square size={11} strokeWidth={2.2} fill="currentColor" />
+                    停止
+                  </button>
+                )}
+                <SendButton
+                  disabled={!desktopActive || (!input.trim() && attachments.length === 0)}
+                  mode={foregroundLive ? "steer" : "send"}
+                />
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
+        </div>
         {skillError && (
           <div style={{ fontSize: 12.5, color: "var(--danger)", marginTop: 8, paddingLeft: 4 }}>
             {skillError}
@@ -711,216 +960,12 @@ export function ChatPanel({
           botId={botId}
           draft={skillDraft}
           onClose={() => setSkillDraft(null)}
-          onSaved={() => setSkillDraft(null)}
+          onSaved={() => {
+            setSkillDraft(null);
+            setSkills(null); // re-fetch on next menu open so the new skill shows up
+          }}
         />
       )}
-    </div>
-  );
-}
-
-/**
- * Review-before-publish for a distilled skill. `analyzeSkill` produces a DRAFT from the conversation's
- * action trace; this dialog is the human gate — the reviewer edits the name/when-to-use/playbook and
- * confirms the `{{secrets.NAME}}` list before it's written as a bot-scoped skill. Nothing is saved
- * until "保存经验" succeeds. Secret NAMES only ever appear here (never values) — the playbook already
- * had literals rewritten to `{{secrets.NAME}}` upstream.
- */
-function SkillReviewDialog({
-  botId,
-  draft,
-  onClose,
-  onSaved,
-}: {
-  botId: string;
-  draft: SkillDraft;
-  onClose: () => void;
-  onSaved: (skill: Skill) => void;
-}) {
-  const [name, setName] = useState(draft.name);
-  const [description, setDescription] = useState(draft.description);
-  const [playbook, setPlaybook] = useState(draft.playbook);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Secret NAMES the playbook references. Kept in sync with the edited text so a reviewer who removes
-  // a {{secrets.X}} line doesn't leave a dangling declared secret (and vice-versa).
-  const secretRefs = useMemo(() => {
-    const found = new Set<string>();
-    for (const m of playbook.matchAll(/\{\{secrets\.([A-Za-z0-9_]+)\}\}/g)) {
-      if (m[1]) found.add(m[1]);
-    }
-    return [...found];
-  }, [playbook]);
-
-  const save = useCallback(async () => {
-    setError(null);
-    setSaving(true);
-    try {
-      const skill = await api.saveSkill(botId, {
-        ...draft,
-        name: name.trim(),
-        description: description.trim(),
-        playbook: playbook.trim(),
-        secretRefs,
-      });
-      onSaved(skill);
-    } catch (err) {
-      setError(errorText(err, { fallback: "保存失败,请重试。" }));
-    } finally {
-      setSaving(false);
-    }
-  }, [botId, draft, name, description, playbook, secretRefs, onSaved]);
-
-  const canSave =
-    name.trim().length > 0 && description.trim().length > 0 && playbook.trim().length > 0;
-  const fieldStyle = {
-    width: "100%",
-    padding: "8px 10px",
-    borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--border)",
-    background: "var(--surface)",
-    color: "var(--ink)",
-    fontSize: 13,
-    fontFamily: "inherit",
-    resize: "vertical" as const,
-  };
-  const labelStyle = { fontSize: 12, color: "var(--ink-secondary)", fontWeight: 500 };
-
-  return (
-    <div
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        display: "grid",
-        placeItems: "center",
-        padding: 24,
-        background: "rgba(0,0,0,0.5)",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "100%",
-          maxWidth: 560,
-          maxHeight: "88vh",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          padding: 20,
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border)",
-          background: "var(--bg)",
-          boxShadow: "var(--shadow-lg)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <GraduationCap size={18} strokeWidth={2} color="var(--ink-secondary)" />
-          <div style={{ fontSize: 15, fontWeight: 600 }}>提炼为经验</div>
-        </div>
-        <div
-          style={{ fontSize: 12.5, color: "var(--ink-secondary)", lineHeight: 1.5, marginTop: -6 }}
-        >
-          这是根据这次对话自动生成的草稿,确认或修改后保存。之后这个 bot 遇到类似任务会参考它。
-        </div>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={labelStyle}>名称</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} style={fieldStyle} />
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={labelStyle}>何时使用</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            style={fieldStyle}
-          />
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={labelStyle}>操作步骤(playbook)</span>
-          <textarea
-            value={playbook}
-            onChange={(e) => setPlaybook(e.target.value)}
-            rows={10}
-            style={{
-              ...fieldStyle,
-              fontFamily: "var(--font-mono, ui-monospace), monospace",
-              lineHeight: 1.55,
-            }}
-          />
-        </label>
-
-        {secretRefs.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <span style={labelStyle}>引用的密钥(仅名称,值由 bot 的密钥库提供)</span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {secretRefs.map((s) => (
-                <code
-                  key={s}
-                  style={{
-                    fontSize: 12,
-                    padding: "2px 8px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border)",
-                    background: "var(--surface)",
-                    color: "var(--ink-secondary)",
-                  }}
-                >
-                  {`{{secrets.${s}}}`}
-                </code>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {error && <div style={{ fontSize: 12.5, color: "var(--danger)" }}>{error}</div>}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            style={{
-              height: 34,
-              padding: "0 14px",
-              borderRadius: "var(--radius-sm)",
-              border: "1px solid var(--border)",
-              background: "transparent",
-              color: "var(--ink-secondary)",
-              fontSize: 13,
-              cursor: saving ? "not-allowed" : "pointer",
-            }}
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || !canSave}
-            className="btn btn-primary"
-            style={{
-              height: 34,
-              padding: "0 16px",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              cursor: saving || !canSave ? "not-allowed" : "pointer",
-              opacity: canSave ? 1 : 0.6,
-            }}
-          >
-            {saving && <Loader2 size={13} strokeWidth={2.2} className="spin" />}
-            {saving ? "保存中…" : "保存经验"}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1069,10 +1114,138 @@ function TaskStateIcon({ status }: { status: TaskCard["status"] }) {
   );
 }
 
-/** Auto-grow a textarea to fit its content, capped by its maxHeight. */
-function autoGrow(el: HTMLTextAreaElement) {
+/** A round, borderless 28px icon button for the composer's controls (hover reveals a tint). */
+function ComposerIconButton({
+  onClick,
+  disabled,
+  title,
+  active = false,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  /** pressed/open state (e.g. while its menu is showing) */
+  active?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-expanded={active}
+      className="composer-icon"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 28,
+        height: 28,
+        borderRadius: 999,
+        border: 0,
+        background: active ? "var(--surface-hover)" : "transparent",
+        color: disabled ? "var(--ink-muted)" : active ? "var(--ink)" : "var(--ink-secondary)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        flex: "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Least conversation height the composer may not eat into. The textarea's cap is whatever the panel
+ * has left above this; the fixed floor keeps a long draft from pushing the thread off-screen.
+ */
+const COMPOSER_MIN_THREAD_PX = 160;
+/** Fallback cap when the panel can't be measured (SSR / detached). */
+const COMPOSER_FALLBACK_MAX_PX = 240;
+
+/**
+ * Fit the composer textarea to its content, capped at the space the panel can spare. The cap is
+ * the panel height minus everything that isn't the textarea (thread floor + composer chrome), so
+ * growing the field shrinks the thread down to its floor and no further.
+ *
+ * Measured, not styled: `height: auto` forces the browser to report the content's real scrollHeight
+ * for the CURRENT padding, so this must run after any padding change (the open/compact swap) — the
+ * layout effect re-runs it post-render for exactly that reason.
+ */
+function fitComposer(
+  el: HTMLTextAreaElement,
+  panel: HTMLElement | null,
+  footer: HTMLElement | null,
+) {
+  const cs = getComputedStyle(el);
+  const lineHeight = parseFloat(cs.lineHeight) || 20;
+  const oneLine = lineHeight + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+
   el.style.height = "auto";
-  el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  const content = el.scrollHeight;
+
+  let max = COMPOSER_FALLBACK_MAX_PX;
+  if (panel && footer) {
+    // The footer's height minus the field = attachment chips, control row, paddings, borders. The
+    // field may grow into panel − that chrome − the thread floor.
+    const chrome = footer.offsetHeight - el.offsetHeight;
+    max = Math.max(oneLine, panel.clientHeight - chrome - COMPOSER_MIN_THREAD_PX);
+  }
+  const h = Math.min(content, max);
+  el.style.height = `${h}px`;
+  // Scroll inside the field only once it is pinned at the cap; a field that still fits never shows
+  // a scrollbar.
+  el.style.overflowY = content > max + 1 ? "auto" : "hidden";
+}
+
+/**
+ * The width the field has in the COMPACT row (sharing it with the buttons), whichever layout is
+ * currently showing. Compact: the field's own width. Open: the row's width minus every sibling
+ * (button groups) and the gaps between them — what the field would get if the row collapsed.
+ */
+function compactFieldWidth(el: HTMLTextAreaElement, compact: boolean): number {
+  if (compact) return el.clientWidth;
+  const row = el.parentElement;
+  if (!row) return el.clientWidth;
+  const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+  let siblings = 0;
+  let n = 0;
+  for (const c of Array.from(row.children)) {
+    if (c === el || !(c instanceof HTMLElement) || c.hidden) continue;
+    // In the open row the left group stretches (flex: 1 1 auto); its buttons' intrinsic width is
+    // what it takes in the compact row, so sum the children rather than the stretched box.
+    siblings += Array.from(c.children).reduce((w, b) => w + (b as HTMLElement).offsetWidth, 0);
+    n++;
+  }
+  return row.clientWidth - siblings - gap * n;
+}
+
+/**
+ * Does the text wrap AT THE COMPACT WIDTH? Decides compact pill vs. two-row layout: the field opens
+ * exactly when it can no longer hold the draft on one line beside the buttons.
+ *
+ * Measured at the compact width on purpose, whichever layout is currently showing. The two layouts
+ * give the field different widths, so a "does it wrap right now" test is a function of the layout
+ * it is deciding — a sentence that wraps in the narrow compact field but fits the wide open one
+ * flips compact→open→compact forever ("Maximum update depth exceeded"). Fixing the probe width
+ * makes the answer a pure function of the text, so one state change always settles. The probe is a
+ * synchronous write/read/restore inside one frame: nothing is painted in between.
+ */
+function needsOpenLayout(el: HTMLTextAreaElement, compact: boolean): boolean {
+  const cs = getComputedStyle(el);
+  const lineHeight = parseFloat(cs.lineHeight) || 20;
+  const oneLine = lineHeight + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const width = compactFieldWidth(el, compact);
+  const prev = { height: el.style.height, width: el.style.width, flex: el.style.flex };
+  el.style.flex = "none";
+  el.style.width = `${width}px`;
+  el.style.height = "auto";
+  const wraps = el.scrollHeight > oneLine + lineHeight * 0.5;
+  el.style.height = prev.height;
+  el.style.width = prev.width;
+  el.style.flex = prev.flex;
+  return wraps;
 }
 
 /** A staged attachment shown above the composer footer: image thumbnail or a video filename chip. */
@@ -1085,9 +1258,9 @@ function AttachmentChip({ part, onRemove }: { part: FileUIPart; onRemove: () => 
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
-        height: isImage ? 44 : 28,
+        height: isImage ? 44 : 26,
         padding: isImage ? 0 : "0 8px 0 7px",
-        borderRadius: "var(--radius-sm)",
+        borderRadius: isImage ? "var(--radius-sm)" : 999,
         border: "1px solid var(--border)",
         background: "var(--surface)",
         overflow: "hidden",
@@ -1157,9 +1330,9 @@ function SendButton({ disabled, mode }: { disabled: boolean; mode: "send" | "ste
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 30,
-        height: 30,
-        borderRadius: "var(--radius-sm)",
+        width: 28,
+        height: 28,
+        borderRadius: 999,
         border: disabled ? "1px solid var(--border)" : "1px solid var(--accent)",
         background: disabled ? "transparent" : "var(--accent)",
         color: disabled ? "var(--ink-muted)" : "var(--accent-fg)",
@@ -1173,10 +1346,10 @@ function SendButton({ disabled, mode }: { disabled: boolean; mode: "send" | "ste
           top-anchors the belt so the FIRST arrow fills the window at rest (centered), instead of
           the belt centering as a whole and showing the seam between the two arrows. */}
       <span className="send-belt" aria-hidden style={{ alignSelf: "flex-start" }}>
-        <span style={{ height: 30, display: "grid", placeItems: "center" }}>
+        <span style={{ height: 28, display: "grid", placeItems: "center" }}>
           <ArrowUp size={16} strokeWidth={2.4} />
         </span>
-        <span style={{ height: 30, display: "grid", placeItems: "center" }}>
+        <span style={{ height: 28, display: "grid", placeItems: "center" }}>
           <ArrowUp size={16} strokeWidth={2.4} />
         </span>
       </span>
@@ -1232,7 +1405,7 @@ function MessageRow({
                   borderRadius: "var(--radius-md)",
                   padding: "8px 12px",
                   color: "var(--ink)",
-                  fontSize: 13.5,
+                  fontSize: "var(--text-body)",
                   lineHeight: 1.6,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
@@ -1247,7 +1420,10 @@ function MessageRow({
           return (
             <div key={i} className="prose" style={{ maxWidth: "68ch", width: "100%" }}>
               <Markdown
-                remarkPlugins={[remarkGfm]}
+                // remark-directive parses `:tag[text]{tone=ok}`; remarkTags turns that one
+                // directive into a `ui-chip` element (see lib/markdown-tags). Order matters:
+                // directive must run before the plugin that consumes its nodes.
+                remarkPlugins={[remarkGfm, remarkDirective, remarkTags]}
                 // Syntax-highlight fenced code (lowlight/highlight.js). `detect` so a fence with no
                 // language still gets tokenized; `ignoreMissing` so an unknown language degrades to
                 // plain text instead of throwing. Tokens are styled by `.hljs-*` rules in globals.css.
@@ -1255,6 +1431,11 @@ function MessageRow({
                 components={{
                   // Open any link the model emits in a new tab, safely.
                   a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+                  // `:tag[...]{tone=…}` → inline chip. The tone is model-authored, so it goes
+                  // through the allow-list; the children are plain markdown text, never HTML.
+                  ...tagComponents((p) => (
+                    <Chip tone={toChipTone(p["data-tone"])}>{p.children}</Chip>
+                  )),
                   // Wrap tables so a wide one scrolls inside the bubble instead of stretching the
                   // whole chat column.
                   table: (props) => (
@@ -1274,8 +1455,10 @@ function MessageRow({
         }
         if (isToolUIPart(part)) {
           const toolName = getToolName(part);
-          // A rendered A2UI panel: show the interactive surface, not a tool "action" line.
-          if (toolName === "render_ui") {
+          // A rendered A2UI panel: show the interactive surface, not a tool "action" line. Both
+          // tools emit the same `{a2ui}` output — `render_ui` is hand-written, `render_card` is a
+          // plugin template expanded server-side — so they render through one path.
+          if (toolName === "render_ui" || toolName === "render_card") {
             const out = (part as { output?: { a2ui?: unknown } }).output;
             const msgs = Array.isArray(out?.a2ui) ? (out.a2ui as A2uiMessage[]) : null;
             // No output yet (tool call still streaming) → render nothing until the panel arrives.
@@ -1289,6 +1472,13 @@ function MessageRow({
       })}
     </div>
   );
+}
+
+/** True when the last message is an assistant turn that has already produced some prose. */
+function liveTurnHasText(messages: UIMessage[]): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return false;
+  return last.parts.some((p) => p.type === "text" && p.text.trim().length > 0);
 }
 
 /**

@@ -37,6 +37,10 @@
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+
+  --text-body: var(--text-body);
+  --text-label: var(--text-label);
+  --text-caption: var(--text-caption);
 }
 
 /* Bridge next/font (geist) hashed family vars into our design tokens. */
@@ -101,7 +105,7 @@ pre,
  * First/last child margins collapse so a bubble never carries stray top/bottom space.
  */
 .prose {
-  font-size: 13.5px;
+  font-size: var(--text-body);
   line-height: 1.6;
   color: var(--ink);
   word-break: break-word;
@@ -145,7 +149,7 @@ pre,
   font-size: 14px;
 }
 .prose h4 {
-  font-size: 13.5px;
+  font-size: var(--text-body);
 }
 .prose a {
   color: var(--accent);
@@ -307,12 +311,55 @@ pre,
   --a2ui-color-input: var(--surface);
   --a2ui-color-on-input: var(--ink);
 
-  /* shape + type → our tokens */
+  /* shape → our tokens */
   --a2ui-border-radius: var(--radius-sm);
   --a2ui-border-width: 1px;
   --a2ui-font-family-title: var(--font-sans);
   --a2ui-font-family-monospace: var(--font-mono);
-  --a2ui-font-size: 13.5px;
+
+  /*
+   * Type scale + spacing grid → our tokens. The package injects a default theme on :root where
+   * `--a2ui-font-size: 1rem` (16px) and `--a2ui-grid-base: 0.5rem` drive EVERY component's text
+   * size, gap, padding and margin (AudioPlayer caption = font-size-xs, Tabs header = spacing-m/l,
+   * Card margin = spacing-m, CheckBox/Slider margin = spacing-m, …). Our chat body is 13px, so the
+   * default reads a size and a half too big — the "粗犷" look. The derived tokens (`-xs/-s/-l`,
+   * `spacing-s/l`) are calc()'d on :root and DON'T re-evaluate when only the base is overridden here
+   * (custom properties resolve where they're defined), so each step is restated, mapped onto the
+   * three sizes the chat is set in: body 13 / label 12.5 / caption 12, and one scale step up for
+   * headings. Spacing is a 4px grid inside a card (tight rows), not the package's 8px.
+   */
+  --a2ui-font-size: var(--text-body);
+  --a2ui-font-size-m: var(--text-body);
+  --a2ui-font-size-s: var(--text-label);
+  --a2ui-font-size-xs: var(--text-caption);
+  --a2ui-font-size-l: 14px;
+  --a2ui-font-size-xl: 15.5px;
+  --a2ui-font-size-2xl: 17px;
+  --a2ui-line-height-body: 1.55;
+  --a2ui-line-height-headings: 1.3;
+  --a2ui-grid-base: 4px;
+  --a2ui-spacing-xs: 2px;
+  --a2ui-spacing-s: 4px;
+  --a2ui-spacing-m: 8px;
+  --a2ui-spacing-l: 12px;
+  --a2ui-spacing-xl: 16px;
+  /* a Card is already framed by the panel: no outer margin, no drop shadow (hairline paradigm) */
+  --a2ui-card-margin: 0;
+  --a2ui-card-padding: 12px;
+  --a2ui-card-box-shadow: none;
+  --a2ui-card-border: 1px solid var(--border);
+  --a2ui-card-border-radius: var(--radius-md);
+  /* controls: the margins the package adds around CheckBox / Slider come from spacing-m; the
+     Column gap already separates rows, so drop them */
+  --a2ui-checkbox-margin: 0;
+  --a2ui-slider-margin: 0;
+  --a2ui-label-font-weight: 500;
+  --a2ui-text-caption-color: var(--ink-muted);
+  /* media: match the card radius so images / video sit in the same geometry as everything else */
+  --a2ui-image-border-radius: var(--radius-sm);
+  --a2ui-video-border-radius: var(--radius-sm);
+  --a2ui-audioplayer-border-radius: var(--radius-sm);
+  --a2ui-icon-size: 18px;
 
   /* component knobs that our flat, hairline paradigm cares about */
   --a2ui-button-box-shadow: none;
@@ -325,7 +372,7 @@ pre,
 .a2ui-panel .a2ui-surface {
   font-family: var(--font-sans);
   color: var(--ink);
-  font-size: 13.5px;
+  font-size: var(--text-body);
 }
 
 /*
@@ -353,7 +400,13 @@ pre,
   font-family: inherit;
 }
 
-/* headings (Text h1–h5 render as real heading tags inside a wrapper div) */
+/* Text — the panel is set in the chat's body size; `body` variant renders markdown into a div,
+   `caption` as <em> inside a span, h1–h5 as real heading tags inside a wrapper div */
+.a2ui-panel {
+  font-size: var(--text-body);
+  line-height: 1.55;
+  color: var(--ink);
+}
 .a2ui-panel :is(h1, h2, h3, h4, h5) {
   margin: 0;
   font-weight: 560;
@@ -370,14 +423,91 @@ pre,
   font-size: 14px;
 }
 .a2ui-panel :is(h4, h5) {
-  font-size: 13.5px;
+  font-size: var(--text-body);
+}
+/* caption: meta text, not italic — the package wraps it in <em> for semantics only */
+.a2ui-panel em {
+  font-style: normal;
+  font-size: var(--text-caption);
+  color: var(--ink-muted);
+}
+/* body-variant markdown: same rhythm as .prose, but no outer margins (the Column gap spaces rows) */
+.a2ui-panel p {
+  margin: 0;
+}
+.a2ui-panel p + p {
+  margin-top: 6px;
+}
+.a2ui-panel :is(ul, ol) {
+  margin: 0;
+  padding-left: 18px;
+}
+.a2ui-panel li {
+  margin: 1px 0;
+}
+.a2ui-panel code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.a2ui-panel a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* labels (TextField / CheckBox / ChoicePicker / Slider / DateTimeInput) */
 .a2ui-panel label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 500;
   color: var(--ink-secondary);
+}
+
+/* media — sized to the card, never bleeding past it; native players at our size and radius */
+.a2ui-panel :is(img, video) {
+  display: block;
+  max-width: 100%;
+}
+.a2ui-panel audio {
+  display: block;
+  width: 100%;
+  height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+/* Tabs (real string classes). The header's padding/background/colour are INLINE, read from
+   `--a2ui-tabs-*` knobs — set those; `!important` only where the component hardcodes a fallback
+   (padding) that the knob can't reach. Underline tab bar: text-only headers, active gets an ink rule. */
+.a2ui-panel {
+  --a2ui-tabs-header-background: transparent;
+  --a2ui-tabs-header-background-active: transparent;
+  --a2ui-tabs-header-color: var(--ink-secondary);
+  --a2ui-tabs-header-color-active: var(--ink);
+  --a2ui-tabs-border: 1px solid var(--border);
+  --a2ui-tabs-content-padding: 0;
+}
+.a2ui-panel .a2ui-tab-button {
+  min-height: 28px !important;
+  padding: 0 10px !important;
+  font-size: var(--text-label);
+  font-weight: 500;
+  border-radius: 0 !important;
+  /* sit on the bar's hairline so the active rule replaces it, not stacks under it */
+  margin-bottom: -1px;
+  box-shadow: inset 0 -1px 0 transparent;
+  transition:
+    color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.a2ui-panel .a2ui-tab-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+.a2ui-panel .a2ui-tab-button.active {
+  box-shadow: inset 0 -1.5px 0 var(--ink);
 }
 
 /* text + number inputs and multiline */
@@ -413,22 +543,199 @@ pre,
 .a2ui-panel :is(input, textarea)::placeholder {
   color: var(--ink-muted);
 }
-.a2ui-panel :is(input, textarea):focus {
+/* focus ring for the TEXT-LIKE fields only. Not `input` bare: that also matched range / checkbox /
+   radio and drew a 3px halo around the whole slider on every drag (they get their own, below) */
+.a2ui-panel :is(input:not([type="range"], [type="checkbox"], [type="radio"]), textarea):focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 
-/* checkboxes / radios keep the browser control but wear the accent + a real gap from their label */
+/*
+ * Checkboxes / radios (CheckBox, ChoicePicker options) and the Slider track.
+ *
+ * Why the custom control instead of `accent-color` on the native one: `accent-color` only tints the
+ * CHECKED fill; the unchecked box/circle is drawn by the UA in near-black ink (Chrome: #767676→#1a1a1a
+ * on hover), which is the "太黑" here — and the unchecked state is what a form mostly shows. It also
+ * can't be reached by the token bridge: CheckBox sets its border inline from `--a2ui-checkbox-border`
+ * (unset → `--a2ui-border` → unset → falls to the UA), so the stylesheet loses to the inline style
+ * unless it's `!important`. `appearance: none` hands the whole control to us: hairline grey box at rest,
+ * accent fill + dark tick when checked (same contrast rule as --accent-fg), ring on focus. Roles and
+ * keyboard stay native — only the paint changes.
+ */
 .a2ui-panel :is(input[type="checkbox"], input[type="radio"]) {
-  accent-color: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
   width: 15px;
   height: 15px;
   margin: 0 6px 0 0;
   flex: none;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  /* !important: CheckBox writes border/background/border-radius inline (see note above). */
+  background: var(--surface) !important;
+  border: 1px solid var(--border-strong) !important;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.a2ui-panel input[type="checkbox"] {
+  border-radius: 4px !important;
+}
+.a2ui-panel input[type="radio"] {
+  border-radius: 999px !important;
+}
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]):hover:not(:disabled) {
+  border-color: var(--ink-muted) !important;
+}
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* checked: accent fill with the on-accent ink for the mark (--accent-fg: white on #03d1ac is only
+   1.96:1, so the tick/dot is dark). Unchecked stays hairline grey — the accent marks a choice made. */
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]):checked {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]):checked:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  border-color: var(--accent-hover) !important;
+}
+/* the mark: drawn with ::before so it needs no extra DOM; scale() 0→1 animates the check-in */
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"])::before {
+  content: "";
+  transform: scale(0);
+  transition: transform var(--dur) var(--ease);
+}
+.a2ui-panel input[type="checkbox"]::before {
+  width: 9px;
+  height: 9px;
+  /* tick as a clip-path so it takes the colour token */
+  background: var(--accent-fg);
+  clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 22%, 84% 8%, 40% 66%);
+}
+.a2ui-panel input[type="radio"]::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent-fg);
+}
+.a2ui-panel :is(input[type="checkbox"], input[type="radio"]):checked::before {
+  transform: scale(1);
 }
 
-/* buttons (Button, and any control the panel renders as <button>) — neutral hairline, our tokens */
+/* ChoicePicker option text: `strong` label + plain option rows (the package ships no CSS for
+   its classes) — normal weight, body ink, comfortable row height */
+.a2ui-panel label:has(> input[type="checkbox"], > input[type="radio"]) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  font-weight: 450;
+  color: var(--ink);
+}
+.a2ui-panel strong {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+/*
+ * Slider: grey track, accent fill up to the thumb, accent thumb — the standard "how much" reading.
+ *
+ * Why not `accent-color`: the package sets accent + track INLINE (`--a2ui-slider-*` → `--a2ui-color-*`
+ * from our bridge), and the UA thumb keeps a near-black outline regardless (measured #3b3b3b) — so we
+ * take the whole control with `appearance: none`. The filled portion is a two-stop gradient on the
+ * track whose split point is `--a2ui-range-fill` (a %); CSS can't read a range's value, so `A2uiPanel`
+ * sets that variable from the input's value/min/max on input events (one delegated listener, no
+ * per-slider React). WebKit fires no `:focus-visible` on drag, only on keyboard, so the ring appears
+ * for keyboard users and stays out of the way for the mouse. Track/thumb pseudo-elements are per-
+ * engine and can't share one rule, hence the WebKit + Gecko pairs.
+ */
+.a2ui-panel {
+  --a2ui-slider-track-color: transparent;
+  --a2ui-slider-thumb-color: var(--accent);
+}
+.a2ui-panel input[type="range"] {
+  --a2ui-range-fill: 0%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 16px;
+  margin: 0;
+  background: transparent !important;
+  cursor: pointer;
+}
+.a2ui-panel input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--a2ui-range-fill),
+    var(--border-strong) var(--a2ui-range-fill) 100%
+  );
+}
+.a2ui-panel input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+/* Gecko has a real fill pseudo-element; no gradient trick needed there */
+.a2ui-panel input[type="range"]::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.a2ui-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5.5px; /* centre a 14px thumb on a 3px track */
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  transition:
+    background var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+.a2ui-panel input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+.a2ui-panel input[type="range"]:hover::-webkit-slider-thumb {
+  background: var(--accent-hover);
+}
+.a2ui-panel input[type="range"]:hover::-moz-range-thumb {
+  background: var(--accent-hover);
+}
+.a2ui-panel input[type="range"]:focus-visible {
+  outline: none;
+}
+.a2ui-panel input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.a2ui-panel input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/*
+ * Buttons. The base rule is the `default` variant: neutral hairline, our tokens. The other two key
+ * off `data-variant`, which OUR Button implementation stamps (a2ui-catalog.tsx) — the stock one
+ * reads its variant into class names from an empty map, so the DOM had nothing to style against and
+ * primary / borderless looked identical to default.
+ *   primary    — the one call-to-action: accent fill, dark on-accent ink (--accent-fg; white on the
+ *                accent is 1.96:1). One per panel, by convention.
+ *   borderless — link-like: no border/fill, secondary ink, hover shows a soft tint. For "cancel",
+ *                "skip", "show more".
+ * `.a2ui-panel button` (no data-variant) still catches any other <button> a component renders.
+ */
 .a2ui-panel button {
   display: inline-flex;
   align-items: center;
@@ -446,6 +753,7 @@ pre,
   transition:
     background var(--dur) var(--ease),
     border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease);
 }
 .a2ui-panel button:hover:not(:disabled) {
@@ -461,12 +769,33 @@ pre,
   cursor: not-allowed;
 }
 
-/* card / modal surfaces (real string classes, but the package ships no CSS for them) */
+.a2ui-panel button[data-variant="primary"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+.a2ui-panel button[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.a2ui-panel button[data-variant="borderless"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-secondary);
+  padding: 0 9px;
+}
+.a2ui-panel button[data-variant="borderless"]:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+/* card / modal surfaces (real string classes, but the package ships no CSS for them). Card's
+   border/radius/padding/margin/shadow come from the `--a2ui-card-*` knobs in the bridge above —
+   they're written INLINE by the component, so a plain rule here would lose; only the ground is set. */
 .a2ui-panel .a2ui-card {
   background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px;
 }
 .a2ui-panel .a2ui-modal-overlay {
   background: color-mix(in srgb, var(--ink) 45%, transparent);
@@ -585,9 +914,33 @@ pre,
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 /* chat composer — the bordered box gets the same focus ring as a single input */
+/* The pill composer: focus lifts the hairline to the strong border — no accent ring. A 3px teal
+   halo around a full-round 40px capsule reads as a toggle, not a text field. */
 .composer:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-ring);
+  border-color: var(--border-strong);
+}
+.composer-icon:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+/* The "+" menu pops up from the composer's top edge: a short scale+fade from the bottom. */
+@keyframes composer-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.composer-menu {
+  animation: composer-menu-in 160ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-menu {
+    animation: none;
+  }
 }
 
 .field {
@@ -704,6 +1057,157 @@ pre,
   animation: spin 0.7s linear infinite;
 }
 
+/* ---------- components/ui motion ---------- */
+/*
+ * Keyframes for the ui/ primitives (Loader, ShimmerText, WalkingBot). Kept here, not in the
+ * components, so every ui/ animation is in one place and the reduced-motion override below can
+ * switch them off together. Components only set duration/delay inline.
+ */
+
+/* Loader: one grid cell brightening as the wavefront passes. Rests at the cell's inline opacity. */
+@keyframes pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.ui-pixel {
+  animation-name: pixel-on;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* ShimmerText: slide the highlight band across the glyphs (background-position only, no reflow). */
+@keyframes shimmer-text {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.ui-shimmer {
+  animation: shimmer-text 1.4s linear infinite;
+}
+
+/* WalkingBot: a real gait. Legs swing about the hips, arms about the shoulders, and the OPPOSITE
+   limbs move together (left leg forward with right arm forward) — so leg-left shares its phase with
+   arm-right, and leg-right/arm-left run the same animation half a cycle behind. The figure bobs
+   once per step. transform-box:fill-box makes each percentage origin the limb's OWN box, so the
+   pivot is the joint at its top regardless of the translate()s that position the layers. */
+@keyframes stride {
+  0%,
+  100% {
+    transform: rotate(-22deg);
+  }
+  50% {
+    transform: rotate(22deg);
+  }
+}
+@keyframes swing {
+  0%,
+  100% {
+    transform: rotate(14deg);
+  }
+  50% {
+    transform: rotate(-14deg);
+  }
+}
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.2%);
+  }
+}
+.ui-walk svg {
+  animation: bob 310ms ease-in-out infinite;
+  overflow: visible;
+}
+.ui-walk #leg-left,
+.ui-walk #leg-right,
+.ui-walk #arm-left,
+.ui-walk #arm-right {
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+  animation-duration: 620ms;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.ui-walk #leg-left,
+.ui-walk #leg-right {
+  animation-name: stride;
+}
+.ui-walk #arm-left,
+.ui-walk #arm-right {
+  animation-name: swing;
+}
+/* the half-cycle offset: right leg + left arm */
+.ui-walk #leg-right,
+.ui-walk #arm-left {
+  animation-delay: -310ms;
+}
+/* running: shorter cycle, wider swing */
+@keyframes stride-run {
+  0%,
+  100% {
+    transform: rotate(-30deg);
+  }
+  50% {
+    transform: rotate(30deg);
+  }
+}
+@keyframes swing-run {
+  0%,
+  100% {
+    transform: rotate(24deg);
+  }
+  50% {
+    transform: rotate(-24deg);
+  }
+}
+.ui-walk-run svg {
+  animation-duration: 210ms;
+}
+.ui-walk-run #leg-left,
+.ui-walk-run #leg-right,
+.ui-walk-run #arm-left,
+.ui-walk-run #arm-right {
+  animation-duration: 420ms;
+}
+.ui-walk-run #leg-left,
+.ui-walk-run #leg-right {
+  animation-name: stride-run;
+}
+.ui-walk-run #arm-left,
+.ui-walk-run #arm-right {
+  animation-name: swing-run;
+}
+.ui-walk-run #leg-right,
+.ui-walk-run #arm-left {
+  animation-delay: -210ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-pixel,
+  .ui-walk svg,
+  .ui-walk #leg-left,
+  .ui-walk #leg-right,
+  .ui-walk #arm-left,
+  .ui-walk #arm-right {
+    animation: none;
+  }
+  /* the shimmer settles on its mid-tone: still legible, just still */
+  .ui-shimmer {
+    animation: none;
+    background-position: 50% 0;
+  }
+}
+
 /* Hide the scrollbar chrome while keeping the area scrollable (chat transcript). Content still
    scrolls by wheel/trackpad/keys; we just drop the visible track for a cleaner column. */
 .no-scrollbar {
@@ -781,4 +1285,521 @@ pre,
   .rail-shades {
     animation: none;
   }
+}
+
+/* Preview tabs, title and actions share one row. Only the orb carries the selection color. */
+.workspace-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  min-height: 50px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.workspace-preview-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(55%, 300px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.workspace-preview-tabs::-webkit-scrollbar {
+  display: none;
+}
+.workspace-preview-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-secondary);
+  font-size: var(--text-caption);
+}
+.workspace-preview-actions {
+  display: flex;
+  flex: none;
+  gap: 5px;
+}
+.workspace-preview-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--text-label);
+  cursor: pointer;
+}
+.workspace-preview-tab:hover {
+  background: transparent;
+}
+.workspace-preview-tab:hover .workspace-preview-orb {
+  filter: brightness(1.07);
+}
+.workspace-preview-tab[aria-selected="true"] {
+  background: transparent;
+  color: var(--ink-secondary);
+}
+.workspace-preview-tab:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+.workspace-preview-orb {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--ink-secondary);
+  background: var(--surface);
+}
+.workspace-preview-orb::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 25% 25%, var(--surface) 0%, transparent 57%),
+    radial-gradient(
+      ellipse at 70% 74%,
+      color-mix(in srgb, var(--accent) 48%, var(--surface)) 4%,
+      color-mix(in srgb, var(--ink-muted) 24%, var(--surface)) 85%
+    );
+  filter: blur(5px) hue-rotate(var(--orb-hue, 0deg));
+}
+.workspace-preview-clouds {
+  position: absolute;
+  inset: -25%;
+  pointer-events: none;
+  opacity: 0;
+  filter: hue-rotate(var(--orb-hue, 0deg));
+}
+.workspace-preview-cloud {
+  position: absolute;
+  left: 18%;
+  top: 20%;
+  width: 64%;
+  height: 58%;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) var(--cloud-tint, 32%), var(--surface));
+  filter: blur(3px);
+  transform-origin: 65% 75%;
+  opacity: 0.84;
+}
+.workspace-preview-cloud:nth-child(1) {
+  --cloud-tint: 42%;
+  --cloud-duration: 7.3s;
+  --cloud-delay: var(--orb-delay-a, -1.7s);
+}
+.workspace-preview-cloud:nth-child(2) {
+  --cloud-tint: 4%;
+  --cloud-duration: 10.9s;
+  --cloud-delay: var(--orb-delay-b, -4.3s);
+  left: 30%;
+  top: 10%;
+  width: 58%;
+  height: 72%;
+  transform-origin: 25% 65%;
+}
+.workspace-preview-cloud:nth-child(3) {
+  --cloud-tint: 30%;
+  --cloud-duration: 13.1s;
+  --cloud-delay: var(--orb-delay-c, -2.8s);
+  left: 8%;
+  top: 30%;
+  width: 76%;
+  height: 54%;
+  transform-origin: 75% 20%;
+}
+.workspace-preview-cloud:nth-child(4) {
+  --cloud-tint: 9%;
+  --cloud-duration: 8.9s;
+  --cloud-delay: var(--orb-delay-b, -3.1s);
+  left: 32%;
+  top: 32%;
+  width: 54%;
+  height: 68%;
+  transform-origin: 15% 30%;
+}
+.workspace-preview-cloud:nth-child(5) {
+  --cloud-tint: 48%;
+  --cloud-duration: 6.7s;
+  --cloud-delay: var(--orb-delay-c, -5.2s);
+  left: 12%;
+  top: 12%;
+  width: 56%;
+  height: 64%;
+  transform-origin: 85% 80%;
+}
+.workspace-preview-cloud:nth-child(6) {
+  --cloud-tint: 2%;
+  --cloud-duration: 11.7s;
+  --cloud-delay: var(--orb-delay-a, -6.4s);
+  left: 28%;
+  top: 24%;
+  width: 64%;
+  height: 54%;
+  transform-origin: 20% 70%;
+}
+.workspace-preview-desktop-tab[aria-selected="false"] .workspace-preview-orb {
+  background: transparent;
+}
+.workspace-preview-desktop-tab[aria-selected="false"] .workspace-preview-orb::before {
+  opacity: 0;
+}
+.workspace-preview-tab[aria-selected="true"] .workspace-preview-clouds {
+  opacity: 1;
+}
+.workspace-preview-tab[aria-selected="true"] .workspace-preview-cloud {
+  animation: workspace-cloud-orbit var(--cloud-duration) linear infinite;
+  animation-delay: var(--cloud-delay);
+}
+.workspace-preview-tab[aria-selected="true"] .workspace-preview-cloud:nth-child(even) {
+  animation-direction: reverse;
+}
+.workspace-preview-mark,
+.workspace-preview-icon {
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
+}
+.workspace-preview-mark {
+  display: block;
+}
+.workspace-preview-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 0;
+}
+.workspace-preview-icon[data-loaded="true"] {
+  opacity: 1;
+}
+.workspace-preview-tooltip {
+  position: fixed;
+  z-index: 80;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--ink-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+@keyframes workspace-cloud-orbit {
+  0% {
+    transform: rotate(var(--orb-turn, 0deg)) translate(-8%, 5%) scale(1);
+    border-radius: 50%;
+  }
+  25% {
+    transform: rotate(calc(var(--orb-turn, 0deg) + 90deg)) translate(16%, -12%) scale(1.22, 0.8);
+    border-radius: 42% 58% 63% 37%;
+  }
+  50% {
+    transform: rotate(calc(var(--orb-turn, 0deg) + 180deg)) translate(-15%, 18%) scale(0.82, 1.26);
+    border-radius: 60% 40% 36% 64%;
+  }
+  75% {
+    transform: rotate(calc(var(--orb-turn, 0deg) + 270deg)) translate(12%, -18%) scale(1.25, 0.96);
+    border-radius: 38% 62% 54% 46%;
+  }
+  100% {
+    transform: rotate(calc(var(--orb-turn, 0deg) + 360deg)) translate(-8%, 5%) scale(1);
+    border-radius: 50%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-preview-tab[aria-selected="true"] .workspace-preview-cloud {
+    animation: none;
+  }
+}
+
+/* Bot automation management; dialog stays separate from the live desktop. */
+.automation-dialog {
+  margin: auto;
+  width: min(860px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--text-body);
+}
+.automation-dialog::backdrop {
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+.automation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.automation-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.automation-header p {
+  margin: 0;
+}
+.automation-body {
+  padding: 20px 24px;
+}
+.automation-toolbar,
+.automation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.automation-toolbar > div,
+.automation-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+}
+.automation-toolbar h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.automation-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--ink-secondary);
+}
+.automation-empty svg {
+  margin: 0 auto 12px;
+  color: var(--accent-ink);
+}
+.automation-empty h3 {
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.automation-empty p {
+  margin: 8px auto;
+  max-width: 470px;
+}
+.automation-rule-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.automation-rule {
+  text-align: left;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.automation-rule:hover {
+  background: var(--surface-hover);
+}
+.automation-rule.is-selected {
+  border-color: var(--accent-ink);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.automation-rule > div {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.automation-rule p {
+  margin-top: 6px;
+  color: var(--ink-secondary);
+  font-size: var(--text-caption);
+}
+.automation-enabled {
+  color: var(--accent-ink);
+  white-space: nowrap;
+  font-size: var(--text-caption);
+}
+.automation-detail {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.automation-instruction,
+.automation-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+  line-height: 1.65;
+}
+.automation-result {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.automation-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: var(--text-caption);
+  color: var(--ink-secondary);
+  margin: 12px 0;
+}
+.automation-connection {
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+}
+.automation-dialog details summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.automation-dialog details p,
+.automation-connection > div {
+  margin: 10px 0;
+}
+.automation-dialog code {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+}
+.automation-connection code {
+  display: inline-block;
+  margin: 4px 8px 4px 0;
+}
+.automation-secret {
+  display: block;
+  margin: 8px 0;
+  user-select: all;
+}
+.automation-warning,
+.automation-rule .automation-warning {
+  color: var(--warn);
+}
+.automation-error,
+.automation-warning-box {
+  background: var(--warn-soft);
+  color: var(--warn);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+.automation-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.automation-notice {
+  padding: 10px 12px;
+  color: var(--ok);
+  background: var(--ok-soft);
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+}
+.automation-warning-box .btn {
+  margin-right: 8px;
+}
+.automation-runs-heading {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 24px 0 12px;
+}
+.automation-run {
+  border-top: 1px solid var(--border);
+  padding: 14px 0;
+}
+.automation-run > p {
+  margin: 6px 0;
+}
+.automation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.automation-form h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.automation-form label,
+.automation-resume label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automation-form .input,
+.automation-resume .input {
+  width: 100%;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  resize: vertical;
+}
+.automation-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.automation-form label.automation-check,
+.automation-days label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.automation-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+}
+.automation-form details > label,
+.automation-form details > div {
+  margin-top: 12px;
+}
+.automation-resume {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+@media (max-width: 640px) {
+  .automation-rule-list,
+  .automation-fields {
+    grid-template-columns: 1fr;
+  }
+  .automation-header,
+  .automation-body {
+    padding: 16px;
+  }
+}
+.automation-unread {
+  padding: 0 5px;
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-caption);
 }

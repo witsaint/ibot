@@ -27,12 +27,25 @@ const DEFAULT_PUBLIC_SLUG = "ppio-sandbox-public";
 
 /**
  * The public channel does NOT carry the `e2b/base` alias the internal channel does — creating
- * from it there fails `400 Invalid environment ID`. A codex-family base (`ppcodex`, envd 0.2.0,
- * Debian 13 trixie) is the verified stock base on public: the runtime `provisionDesktop` recipe
- * installs the full desktop (real Chrome + CDP@9223 + noVNC) on it end-to-end. This is the
- * per-channel replacement for `e2b/base` when a box lands on the public egress channel. Override
- * with `SANDBOX_PUBLIC_BASE_IMAGE` if the gateway later registers a different public base. */
-const DEFAULT_PUBLIC_BASE_IMAGE = "zsob2dxzqa2lcepse0b0";
+ * from it there fails `400 Invalid environment ID`, so a box landing on public needs a base
+ * registered on that channel. `codeoff-server` is that base, and it is the biggest one the gateway
+ * offers: 4 vCPU / 8192 MiB, node v26.8.1, npm 11.19.0, Chrome 154 and codex-cli preinstalled
+ * (Debian, envd present). `provisionDesktop` runs on it end to end — live-verified: full desktop,
+ * real Chrome, CDP, noVNC, 175s.
+ *
+ * Why the biggest rather than the previous `ppcodex` (2 vCPU / 4096 MiB): the box has to host the
+ * bot's dev servers alongside the desktop and browser, and headroom is what makes that possible at
+ * all. Measured on this base with a Vite dev server + Chrome (12 procs) + the desktop stack all
+ * resident: 767 MB of 7967 MB used, no OOM. The node version matters just as much — modern Vite is
+ * built on rolldown and needs `^20.19 || >=22.12`, so on an older base it dies at import
+ * (`node:util` has no `styleText`) and `npm i vite` took 113s vs **9.4s** here, which is the
+ * difference between needing a background task and a plain `run_command`.
+ *
+ * Override with `SANDBOX_PUBLIC_BASE_IMAGE` if the gateway registers a different/bigger base. Note
+ * these template ids are registered PER CHANNEL: all of them 404 on the internal channel, whose only
+ * base is `e2b/base` (2 vCPU / 1024 MB, node v20.9.0) — so a bot pinned to internal cannot get this
+ * image, and cannot host a modern dev server. */
+const DEFAULT_PUBLIC_BASE_IMAGE = "xf3sz12wrms461c4h5dt";
 
 export const SandboxEnv = z.object({
   /** the single AIProxy gateway credential (fed to the SDK as the api key) */

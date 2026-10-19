@@ -34,7 +34,7 @@ interface Tab {
 const TABS: Tab[] = [
   {
     key: "bg",
-    label: "Background",
+    label: "Color", // the swatch tab: "Background" is the one label that clips at narrow widths
     count: BACKGROUNDS.length,
     optionLabels: BACKGROUNDS.map((_, i) => `Color ${i + 1}`),
     render: (v, i) => ({ ...v, bg: i }),
@@ -74,7 +74,9 @@ export function AvatarPicker({
   const selectedIndex = value[active.key];
 
   return (
-    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+    // Wraps: beside each other when there's room (CreateBotDialog), preview above the controls
+    // when the host is narrow (the design sheet's 300px column). Nothing here assumes a width.
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-start" }}>
       {/* live preview */}
       <div
         style={{
@@ -90,7 +92,15 @@ export function AvatarPicker({
         <BotAvatar config={value} size={88} title="avatar preview" />
       </div>
 
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        style={{
+          flex: "1 1 200px",
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
         {/* tab strip */}
         <div
           role="tablist"
@@ -114,9 +124,13 @@ export function AvatarPicker({
                 aria-selected={on}
                 onClick={() => setTab(t.key)}
                 style={{
-                  flex: 1,
-                  padding: "5px 6px",
-                  fontSize: 12,
+                  flex: "1 1 0",
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  padding: "5px 4px",
+                  fontSize: "var(--text-caption)",
                   fontWeight: on ? 560 : 460,
                   cursor: "pointer",
                   borderRadius: "var(--radius-sm)",
@@ -139,7 +153,9 @@ export function AvatarPicker({
           role="tabpanel"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(8, 1fr)",
+            // as many columns as fit at >=32px each: 8 across in the dialog, 5-6 in a narrow card.
+            // A fixed repeat(8) starved each tile below the avatar's size and cropped the heads.
+            gridTemplateColumns: "repeat(auto-fill, minmax(32px, 1fr))",
             gap: 6,
           }}
         >
@@ -169,7 +185,13 @@ export function AvatarPicker({
                   placeItems: "center",
                 }}
               >
-                <BotAvatar config={active.render(value, i)} size={36} />
+                {/* The avatar fills the tile: size is a CSS 100% via the wrapper, so a 28px tile
+                    shows the whole head instead of cropping a fixed-36px render. */}
+                <BotAvatar
+                  config={active.render(value, i)}
+                  size={36}
+                  style={{ width: "100%", height: "100%" }}
+                />
               </button>
             );
           })}

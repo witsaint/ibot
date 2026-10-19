@@ -35,10 +35,13 @@ export function CreateBotDialog({
   const [avatar, setAvatar] = useState<AvatarConfig>(
     (bot && parseAvatar(bot.avatar)) || DEFAULT_AVATAR,
   );
-  // Public egress: route this bot's desktop through the clean-IP channel (needed to pass
-  // human-verification). Editing seeds from the bot's own value; creating starts at the fleet
-  // default (fetched below). A concrete bool is persisted so a later env change won't move it.
-  const [sandboxPublic, setSandboxPublic] = useState<boolean>(bot?.sandboxPublic ?? false);
+  // Which channel this bot's box is created on. THREE states, and the null one is load-bearing:
+  // `null` means "follow the fleet default", which is what every bot that never chose has. Seeding
+  // it to `false` (as this did) meant opening the edit dialog and pressing Save silently pinned the
+  // bot to the internal channel — and that is not a cosmetic difference: internal only has the small
+  // 2 vCPU / 1 GB base with node v20.9.0, which cannot host a dev server at all. So a bot that has
+  // not chosen must stay unchosen unless the user actually toggles this.
+  const [sandboxPublic, setSandboxPublic] = useState<boolean | null>(bot?.sandboxPublic ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // provider model catalog for the dropdown — fetched on demand from the owner's base URL.
@@ -63,23 +66,23 @@ export function CreateBotDialog({
     };
   }, [editing]);
 
-  // Create only: seed the public-egress checkbox from the fleet default (env SANDBOX_PUBLIC). A bot
-  // that hasn't chosen inherits it; the user can still override per bot here. Editing keeps the bot's
-  // own value. Best-effort — an unreachable /me just leaves the checkbox at its false default.
+  // The fleet default, for DISPLAY only: it tells the user what "not chosen" currently resolves to.
+  // It is deliberately not written into `sandboxPublic` — doing that would turn "inherit" into an
+  // explicit choice the user never made, which is the bug described above.
+  const [fleetDefaultPublic, setFleetDefaultPublic] = useState<boolean | null>(null);
   useEffect(() => {
-    if (editing) return;
     let cancelled = false;
     void api
       .me()
       .then((m) => {
-        if (!cancelled) setSandboxPublic(m.sandboxPublicDefault);
+        if (!cancelled) setFleetDefaultPublic(m.sandboxPublicDefault);
         return null;
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [editing]);
+  }, []);
 
   async function fetchModels() {
     setModelsBusy(true);
@@ -252,22 +255,34 @@ export function CreateBotDialog({
           </div>
 
           <div className="field">
-            <label
-              className="label"
-              htmlFor="bot-public"
-              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-            >
-              <input
-                id="bot-public"
-                type="checkbox"
-                checked={sandboxPublic}
-                onChange={(e) => setSandboxPublic(e.target.checked)}
-                style={{ width: 15, height: 15 }}
-              />
-              公网出口 <span className="muted">(clean IP)</span>
+            <label className="label" htmlFor="bot-channel">
+              沙盒通道
             </label>
+            <select
+              id="bot-channel"
+              className="input"
+              value={sandboxPublic === null ? "inherit" : sandboxPublic ? "public" : "internal"}
+              onChange={(e) =>
+                setSandboxPublic(
+                  e.target.value === "inherit" ? null : e.target.value === "public",
+                )
+              }
+            >
+              <option value="inherit">
+                跟随默认
+                {fleetDefaultPublic === null
+                  ? ""
+                  : fleetDefaultPublic
+                    ? "(当前:公网)"
+                    : "(当前:内网)"}
+              </option>
+              <option value="public">公网 — 4核8G,可跑开发服务,干净出口 IP</option>
+              <option value="internal">内网 — 2核1G,跑不了 Vite,仅内网可达场景</option>
+            </select>
             <span className="muted" style={{ fontSize: 11.5 }}>
-              桌面走公网 channel(干净出口 IP),需要过人机校验的场景开这个。改动在下次重建桌面时生效。
+              通道同时决定盒子规格:公网通道才有大镜像(4核8G、node 26),能在盒子里跑
+              dev server,出口 IP 也是干净的(过人机校验需要)。内网通道只有 2核1G
+              的小镜像、node 20,跑不起现代 Vite。改动在下次重建桌面时生效。
             </span>
           </div>
 

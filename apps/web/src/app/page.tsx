@@ -8,6 +8,7 @@ import { InteractiveStreetlamp } from "@/components/landing/InteractiveStreetlam
 import { SkyClouds } from "@/components/landing/SkyClouds";
 import { InteractivePond } from "@/components/landing/InteractivePond";
 import { api, ApiError } from "@/lib/api";
+import { loginReturnPath } from "@/lib/session";
 import styles from "./page.module.css";
 
 /**
@@ -27,6 +28,8 @@ export default function Home() {
   const router = useRouter();
   // Start in "checking": if there's already a session, we redirect without ever flashing the form.
   const [checking, setChecking] = useState(true);
+  const [returnTo, setReturnTo] = useState("/bots");
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [mode, setMode] = useState<Mode>("signin");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -37,10 +40,14 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
+    const query = new URLSearchParams(window.location.search);
+    const destination = loginReturnPath(query.get("next"));
+    setReturnTo(destination);
+    setSessionExpired(query.get("reason") === "session-expired");
     api
       .me()
       .then(() => {
-        if (!cancelled) router.replace("/bots");
+        if (!cancelled) router.replace(destination);
         return null;
       })
       .catch(() => {
@@ -73,7 +80,7 @@ export default function Home() {
       } else {
         await api.signIn(email.trim(), password);
       }
-      router.replace("/bots");
+      router.replace(returnTo);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Something went wrong";
       setError(
@@ -124,6 +131,12 @@ export default function Home() {
                 ? "Welcome back. Enter your credentials to continue."
                 : "Start building computer-use bots on isolated desktops."}
             </p>
+
+            {sessionExpired && (
+              <p role="status" className="muted">
+                登录已过期，请重新登录。登录后将返回之前的页面。
+              </p>
+            )}
 
             <form
               onSubmit={submit}

@@ -1,0 +1,123 @@
+.figure {
+  display: inline-block;
+  flex: none;
+  line-height: 0;
+  --cycle: 620ms;
+  --half-cycle: -310ms;
+  --stride: 20deg;
+  --arm-swing: 16deg;
+  --knee-bend: 24deg;
+}
+
+.figure [data-part] {
+  transform-box: view-box;
+}
+.figure [data-part="leftUpperArm"] {
+  transform-origin: 233px 98px;
+}
+.figure [data-part="leftForearm"] {
+  transform-origin: 183px 275px;
+}
+.figure [data-part="rightUpperArm"] {
+  transform-origin: 381px 98px;
+}
+.figure [data-part="rightForearm"] {
+  transform-origin: 408px 265px;
+}
+.figure [data-part="leftThigh"] {
+  transform-origin: 267px 448px;
+}
+.figure [data-part="rightThigh"] {
+  transform-origin: 357px 448px;
+}
+.figure [data-part="leftCalf"] {
+  transform-origin: 259px 597px;
+}
+.figure [data-part="rightCalf"] {
+  transform-origin: 359px 597px;
+}
+
+.figure[data-motion="running"] {
+  --cycle: 420ms;
+  --half-cycle: -210ms;
+  --stride: 30deg;
+  --arm-swing: 24deg;
+  --knee-bend: 58deg;
+}
+.figure[data-motion="running"] [data-part="leftForearm"],
+.figure[data-motion="running"] [data-part="rightForearm"] {
+  transform: rotate(-65deg);
+}
+
+.figure:not([data-motion="still"]) [data-part="figure"] {
+  animation: bob var(--cycle) ease-in-out infinite;
+}
+.figure[data-motion="still"] [data-part="road"] rect {
+  animation: none;
+}
+.figure:not([data-motion="still"]) [data-part="leftThigh"],
+.figure:not([data-motion="still"]) [data-part="rightThigh"] {
+  animation: stride var(--cycle) ease-in-out infinite;
+}
+.figure:not([data-motion="still"]) [data-part="leftUpperArm"],
+.figure:not([data-motion="still"]) [data-part="rightUpperArm"] {
+  animation: swing var(--cycle) ease-in-out infinite;
+}
+.figure:not([data-motion="still"]) [data-part="leftCalf"],
+.figure:not([data-motion="still"]) [data-part="rightCalf"] {
+  animation: knee var(--cycle) ease-in-out infinite;
+}
+.figure:not([data-motion="still"]) [data-part="rightThigh"],
+.figure:not([data-motion="still"]) [data-part="rightCalf"],
+.figure:not([data-motion="still"]) [data-part="leftUpperArm"] {
+  animation-delay: var(--half-cycle);
+}
+
+@keyframes stride {
+  0%,
+  100% {
+    transform: rotate(calc(-1 * var(--stride)));
+  }
+  50% {
+    transform: rotate(var(--stride));
+  }
+}
+@keyframes swing {
+  0%,
+  100% {
+    transform: rotate(calc(-1 * var(--arm-swing)));
+  }
+  50% {
+    transform: rotate(var(--arm-swing));
+  }
+}
+@keyframes knee {
+  0%,
+  15%,
+  100% {
+    transform: rotate(4deg);
+  }
+  55% {
+    transform: rotate(var(--knee-bend));
+  }
+  80% {
+    transform: rotate(12deg);
+  }
+}
+@keyframes bob {
+  0%,
+  50%,
+  100% {
+    transform: translateY(0);
+  }
+  25%,
+  75% {
+    transform: translateY(-20px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .figure[data-motion] [data-part] {
+    animation: none;
+    transform: none;
+  }
+}

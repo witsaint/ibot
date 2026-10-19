@@ -15,9 +15,17 @@ import type { AppBindings } from "../context.js";
 /** 401 unless a valid better-auth session is present; sets `userId`. */
 export const requireAuth: MiddlewareHandler<AppBindings> = async (c, next: Next) => {
   const { auth } = c.get("ctx");
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const { response: session, headers } = await auth.api.getSession({
+    headers: c.req.raw.headers,
+    returnHeaders: true,
+  });
+  // getSession can extend the database session or clear an expired one. Both changes
+  // must reach the browser, including on 401 and streaming responses. Never join cookies:
+  // Expires contains commas and each Set-Cookie is a separate header.
+  for (const cookie of headers.getSetCookie()) c.header("Set-Cookie", cookie, { append: true });
+  c.header("Cache-Control", "no-store");
   if (!session?.user) {
-    return c.json({ error: "unauthenticated" }, 401);
+    return c.json({ error: "unauthenticated", message: "登录已过期，请重新登录。" }, 401);
   }
   c.set("userId", session.user.id);
   await next();

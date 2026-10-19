@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { buildAutomationTools, type AutomationActions } from "../automations/tools.js";
 /**
  * The agent run loop. Given a bot, a conversation history, and a live sandbox handle,
  * it streams an AI SDK UI Message Stream (the one format the DB, the model, and the chat
@@ -30,11 +32,32 @@ import {
 import { type ModelCredential, resolveModel } from "./model.js";
 import { pruneHistoryForModel } from "./history.js";
 import { buildSandboxTools, type ToolMode } from "./tools.js";
+import type { Storage } from "@i-bot/storage";
+import { webPreviewsFromMessages } from "@i-bot/types";
+import { buildDesignReferenceTools } from "./design-references.js";
+import { buildWebDesignTools } from "./web-design.js";
+import { buildWebImageTool } from "./web-image.js";
+import { buildWebPreviewTool } from "./web-preview.js";
+import { buildPrepareWebProjectTool } from "./web-project.js";
 import { composeSkillPreamble, loadBotSkills } from "./skills.js";
 import { type BoxMcpEndpoint, connectBotMcpTools } from "./mcp.js";
+import {
+  composePluginNotes,
+  commandSkill,
+  dedupeSkillsByPrecedence,
+  resolvePluginsForBot,
+  visibleSkills,
+} from "../plugins/resolve.js";
+import {
+  buildRenderCardTool,
+  collectUiTemplates,
+  RENDER_CARD_TOOL,
+} from "../plugins/ui-templates.js";
 
 /** How many model↔tool round-trips a single turn may take before we stop. */
 const MAX_STEPS = 24;
+// Creating, building and checking a web project needs more steps than a normal desktop turn.
+const WEB_CREATION_MAX_STEPS = 48;
 
 /**
  * The platform layer prepended to every bot's own system prompt. It frames what this agent IS (a
@@ -59,7 +82,7 @@ const PLATFORM_PROMPT = `You are a computer-use bot: you drive your own private,
 - \`screenshot\` — capture the whole desktop when you need to see it.
 - \`run_command\` — a root shell in the box. Everything non-GUI: scripts, git, curl, file work. Commands have a ~45s default cap; for anything that can run longer, use \`spawn_task\` instead of blocking here. For package installs, pass a non-interactive flag (e.g. \`DEBIAN_FRONTEND=noninteractive apt-get install -y …\`) so it can't hang on a prompt.
 - \`spawn_task\` — kick off independent work in the background and keep chatting; its result comes back to you later. ALWAYS use this (not run_command) for installs (apt/dpkg/pip/npm i), builds, large downloads, scrapes, or any long/multi-step job. Don't sit idle waiting on something long.
-- \`render_ui\` — draw an interactive panel (A2UI) when a form, a set of choices, or a structured card serves the user better than prose. Clicks and submits come back to you as a normal message. To UPDATE a panel you already drew (show the result, react to a submit), call render_ui again with the SAME surfaceId and send only the delta (updateComponents/updateDataModel, no createSurface) — the card changes in place; a new surfaceId draws a separate card. Ordinary replies stay prose.
+- \`render_card\` / \`render_ui\` — draw an interactive panel when a form, a set of choices, or a structured card serves the user better than prose. Clicks and submits come back to you as a normal message. Reach for \`render_card\` first (pick a template, pass its data); \`render_ui\` is the escape hatch where you hand-write the components, and the only way to UPDATE a panel already on screen — call it with that panel's SAME surfaceId and send only the delta (updateComponents/updateDataModel, no createSurface), and the card changes in place. Ordinary replies stay prose.
 - \`save_skill\` / \`bind_mcp\` — record a reusable procedure once you've worked it out; register a remote MCP server for more tools next turn.
 
 ## Do the work yourself — decide honestly when you're blocked
@@ -82,16 +105,22 @@ Don't invent data, numbers, quotes, or citations, and don't describe a screen, a
 Reference stored secrets only as {{secrets.NAME}} — in a run_command or an MCP header. The value is injected at run time; you never see it, and it must never land in a command's text, its output, an MCP config, or the chat. Don't read the environment back out to expose one.
 
 ## Tone
-Warm, sharp, brief. Plain words and contractions, result first — skip "Great question" and "Done —". Prose over bullets in chat. Emoji almost never.`;
+Warm, sharp, brief. Plain words and contractions, result first — skip "Great question" and "Done —". Prose over bullets in chat. Emoji almost never.
+
+## Rich replies
+Your prose is rendered as markdown. Two extra forms, use each where it earns its place:
+- An inline status chip: \`:tag[text]{tone=ok}\` — a small pill in the flow of a sentence for a state or outcome. Tones: ok, warn, danger, info, muted. E.g. "Deployed :tag[live]{tone=ok} to prod" or "Two tests :tag[failing]{tone=danger}". Keep the text to one or two words; don't chip whole sentences, and don't tag things that aren't a state.
+- A card for anything the user acts on or needs laid out: a form, choices, a multi-field summary. Prose and cards interleave freely in one reply — say a line, draw a card, keep talking. Read-only tabular data is a markdown table, not a card.
+A chip is for a fact about state; a card is for structure or interaction. When neither applies, plain prose.`;
 
 /**
  * Compose the platform note, the bot's own prompt, and the bot's skill preamble. Order: platform
  * note → persona (authoritative) → skills (reference material the model draws on). `skills` is ""
  * when the bot has none.
  */
-function composeSystemPrompt(botPrompt: string, skills: string): string {
+function composeSystemPrompt(botPrompt: string, skills: string, pluginNotes = ""): string {
   const base = botPrompt.trim() ? `${PLATFORM_PROMPT}\n\n${botPrompt.trim()}` : PLATFORM_PROMPT;
-  return skills ? `${base}\n\n${skills}` : base;
+  return [base, pluginNotes, skills].filter((s) => s.trim()).join("\n\n");
 }
 
 /**
@@ -115,6 +144,10 @@ export function injectSteer(
 export type RunOutcome = "done" | "error";
 
 export interface RunAgentArgs {
+  automationActions?: AutomationActions;
+  /** Require a durable assistant result before reporting completion (automation workers). */
+  requirePersistedResult?: boolean;
+  onMessagePersisted?: (id: string, parts: MessagePart[]) => void;
   /** the bot OWNER's model credential (key + optional gateway base URL) */
   credential: ModelCredential;
   db: Database;
@@ -136,6 +169,9 @@ export interface RunAgentArgs {
   temperature: number | null;
   /** full UI-message history (including the just-sent user message) */
   history: UIMessage[];
+  /** Validated command from the newest authenticated user message, never inferred by the model. */
+  skillCommand?: string;
+  imageStorage?: Storage | null;
   /** true while a human holds the desktop — gates the GUI tools (see tools.ts) */
   isHumanInControl?: () => boolean;
   /**
@@ -162,7 +198,7 @@ export interface RunAgentArgs {
   onHandoff?: (payload: { reason: string; kind: HandoffKind }) => void;
   /** Scope `run_command` into this working directory (a task's own dir). */
   workdir?: string;
-  /** aborts the model loop mid-run (background cancel); ignored in the foreground path */
+  /** Aborts the model loop when a background job is canceled or a foreground stream disconnects. */
   abortSignal?: AbortSignal;
   /**
    * Mid-run steering: called at each model↔tool step boundary to collect any user messages the
@@ -195,12 +231,23 @@ export interface RunAgentArgs {
  */
 async function buildAgentRun(args: RunAgentArgs) {
   const model = resolveModel(args.credential, args.modelId);
-  // Load the bot's skills once at run start → a system-prompt section. Fixed for the turn (a skill
-  // saved mid-turn is usable same-turn via run_command since its files render immediately, but the
-  // preamble listing it appears next turn). Best-effort: a load failure never blocks the run.
+
+  // Resolve which plugins are live for this bot, then load its skills through them. The plugin set
+  // decides what the model may SEE: a `hidden` skill (referenced only by a hook or an agent) is kept
+  // out of the list, a row whose plugin is disabled stops contributing even if the row outlived the
+  // disable, and two plugins declaring the same skill name collapse to the one closest to the user.
+  // Both fixed for the turn, like the toolset. Best-effort throughout: if resolution fails the run
+  // loads only skills without a plugin, so unavailable plugin policy cannot leak instructions.
+  const resolved = await resolvePluginsForBot(args.db, args.botId).catch(() => null);
   const skillPreamble = await loadBotSkills(args.db, args.botId)
+    .then((rows) =>
+      resolved
+        ? dedupeSkillsByPrecedence(visibleSkills(rows, resolved, args.skillCommand), resolved)
+        : rows.filter((row) => !row.pluginId),
+    )
     .then(composeSkillPreamble)
     .catch(() => "");
+  const pluginNotes = resolved ? composePluginNotes(resolved, args.skillCommand) : "";
   const { tools, dispose } = buildSandboxTools(args.handle, {
     ...(args.mode ? { mode: args.mode } : {}),
     ...(args.isHumanInControl ? { isHumanInControl: args.isHumanInControl } : {}),
@@ -212,6 +259,24 @@ async function buildAgentRun(args: RunAgentArgs) {
     // tenant context: powers run_command's {{secrets.NAME}} injection and the save_skill tool
     tenant: { db: args.db, botId: args.botId },
   });
+  if (args.automationActions) Object.assign(tools, buildAutomationTools(args.automationActions));
+  if (args.skillCommand === "web" && resolved && commandSkill(resolved, "web")) {
+    Object.assign(
+      tools,
+      buildDesignReferenceTools(),
+      buildWebDesignTools(args.handle, webPreviewsFromMessages(args.history)),
+    );
+    tools.preview_web = buildWebPreviewTool(args.handle);
+    tools.prepare_web_project = buildPrepareWebProjectTool(args.handle);
+    if (process.env.AIPROXY_API_KEY) {
+      tools.generate_web_image = buildWebImageTool(args.handle, {
+        apiKey: process.env.AIPROXY_API_KEY,
+        botId: args.botId,
+        storage: args.imageStorage,
+      });
+    }
+  }
+
   // Connect the bot's enabled MCP servers and merge their tools into the toolset. Best-effort: a
   // server that won't connect is skipped, never failing the run. The toolset is FIXED for the turn
   // (a server bound mid-turn appears next turn), matching how skills' preamble is loaded once here.
@@ -219,6 +284,13 @@ async function buildAgentRun(args: RunAgentArgs) {
     ...(args.logger ? { logger: args.logger } : {}),
   }).catch(() => ({ tools: {}, connected: [], failed: [], close: async () => {} }));
   for (const [name, def] of Object.entries(mcp.tools)) tools[name] = def;
+
+  // The plugin layer's card templates, as ONE tool. All the assembly lives in ui-templates.ts — this
+  // is the whole of its wiring, and it's omitted entirely when no live plugin declares a template
+  // (no tool beats a tool whose every call fails). Added after MCP so a server can't shadow it.
+  const cardTool = resolved ? buildRenderCardTool(collectUiTemplates(resolved)) : null;
+  if (cardTool) tools[RENDER_CARD_TOOL] = cardTool;
+
   // Slim the history for the model only (DB keeps the verbatim transcript) — old screenshots
   // are the dominant token cost and would otherwise overflow the context window. Pass `tools`
   // so each tool's `toModelOutput` runs here too: the kept (recent) screenshots in history
@@ -250,7 +322,7 @@ async function buildAgentRun(args: RunAgentArgs) {
 
   const result = streamText({
     model,
-    system: composeSystemPrompt(args.systemPrompt, skillPreamble) + mcpNote,
+    system: composeSystemPrompt(args.systemPrompt, skillPreamble, pluginNotes) + mcpNote,
     ...(args.temperature !== null ? { temperature: args.temperature } : {}),
     messages: modelMessages,
     tools,
@@ -258,7 +330,10 @@ async function buildAgentRun(args: RunAgentArgs) {
     // already fired onHandoff (the block signal); hasToolCall ends the turn right after that step
     // so we don't burn steps after a handoff. The tool call + its output are in the transcript, so
     // the resume turn (a fresh turn replaying history) sees a well-formed exchange.
-    stopWhen: [stepCountIs(MAX_STEPS), hasToolCall("request_handoff")],
+    stopWhen: [
+      stepCountIs(args.skillCommand === "web" ? WEB_CREATION_MAX_STEPS : MAX_STEPS),
+      hasToolCall("request_handoff"),
+    ],
     ...(args.abortSignal ? { abortSignal: args.abortSignal } : {}),
     // Mid-run steering: before each step, drain any messages the user sent while this run was in
     // flight and append them to the step's messages. A returned `messages` override carries
@@ -273,6 +348,7 @@ async function buildAgentRun(args: RunAgentArgs) {
         }
       : {}),
     onFinish: () => settle("done"),
+    onAbort: () => settle("error", new Error("canceled")),
     onError: (event) => {
       // Surface the real failure — without this the stream masks it as "An error occurred".
       console.error("[agent stream error]", event?.error ?? event);
@@ -302,11 +378,14 @@ async function buildAgentRun(args: RunAgentArgs) {
         }
         // Foreground / background / proactive: persist the assistant message verbatim.
         if (parts.length === 0) return;
+        const messageId = randomUUID();
         await args.db.insert(messagesTable).values({
+          id: messageId,
           conversationId: args.conversationId,
           role: "assistant",
           parts,
         });
+        args.onMessagePersisted?.(messageId, parts);
       },
     });
 
@@ -318,7 +397,40 @@ async function buildAgentRun(args: RunAgentArgs) {
  * ready to return straight from a Hono handler. Assistant output is persisted on finish.
  */
 export async function runAgentStream(args: RunAgentArgs): Promise<Response> {
-  return (await buildAgentRun(args)).response();
+  const controller = new AbortController();
+  const abortSignal = args.abortSignal
+    ? AbortSignal.any([args.abortSignal, controller.signal])
+    : controller.signal;
+  const run = await buildAgentRun({ ...args, abortSignal });
+  return releaseStreamOnClose(run.response(), (reason) => {
+    controller.abort(reason);
+    run.settle("error", reason ?? new Error("canceled"));
+  });
+}
+
+/** Client cancellation must release the bot even when SDK finish callbacks never fire. */
+export function releaseStreamOnClose(response: Response, onCancel: (reason: unknown) => void) {
+  if (!response.body) return response;
+  const reader = response.body.getReader();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) controller.close();
+          else controller.enqueue(value);
+        } catch (error) {
+          onCancel(error);
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        onCancel(reason);
+        await reader.cancel(reason);
+      },
+    }),
+    { status: response.status, statusText: response.statusText, headers: response.headers },
+  );
 }
 
 /**
@@ -328,12 +440,20 @@ export async function runAgentStream(args: RunAgentArgs): Promise<Response> {
  * returned promise resolves once the run is fully done (so a worker can finalize its row).
  */
 export async function runAgentToCompletion(args: RunAgentArgs): Promise<void> {
-  const { response, settle } = await buildAgentRun(args);
+  let persisted = false;
+  const { response, settle } = await buildAgentRun({
+    ...args,
+    onMessagePersisted: (id, parts) => {
+      persisted = true;
+      args.onMessagePersisted?.(id, parts);
+    },
+  });
   const res = response();
   try {
     // Reading the body to completion forces the stream (and its onFinish persistence) to run.
     await res.body?.pipeTo(new WritableStream());
-  } catch {
+  } catch (error) {
+    if (args.requirePersistedResult) throw error;
     /* an aborted/broken drain still settles below */
   } finally {
     // Safety net: if the drain ended without success/error firing (e.g. abort), settle now.
@@ -341,4 +461,5 @@ export async function runAgentToCompletion(args: RunAgentArgs): Promise<void> {
     if (args.abortSignal?.aborted) settle("error", new Error("canceled"));
     else settle("done");
   }
+  if (args.requirePersistedResult && !persisted) throw new Error("Agent result was not persisted");
 }

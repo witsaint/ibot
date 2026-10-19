@@ -70,6 +70,13 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur: 150ms;
 
+  /* type scale — the three sizes the chat UI is set in. Body is the reading size for prose,
+     bubbles, A2UI card text and the composer; label for control text; caption for meta
+     (timestamps, hints, elapsed counters). Reference these, never a literal px. */
+  --text-body: 13px;
+  --text-label: 12.5px;
+  --text-caption: 12px;
+
   /* type */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;

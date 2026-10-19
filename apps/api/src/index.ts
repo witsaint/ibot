@@ -11,6 +11,7 @@
 import { serve } from "@hono/node-server";
 import { buildContext } from "./context.js";
 import { loadApiEnv } from "./env.js";
+import { syncBuiltinPlugins } from "./plugins/builtin.js";
 import { createServer } from "./server.js";
 
 async function main(): Promise<void> {
@@ -34,8 +35,23 @@ async function main(): Promise<void> {
     ctx.logger.error({ err: err instanceof Error ? err.message : err }, "reclaimOrphans failed");
   });
 
+  // Sync the plugins we ship with the code into the DB and make sure existing users have them
+  // installed. Idempotent, so it runs every boot; it never re-enables a builtin a user switched off.
+  // Background — plugins resolve per run, so serving never waits on this.
+  void syncBuiltinPlugins(ctx.db, { logger: ctx.logger })
+    .then((counts) => ctx.logger.info(counts, "builtin plugins synced"))
+    .catch((err: unknown) => {
+      ctx.logger.error(
+        { err: err instanceof Error ? err.message : err },
+        "syncBuiltinPlugins failed",
+      );
+    });
+
+  ctx.automations.start();
+
   const shutdown = (signal: string): void => {
     ctx.logger.info({ signal }, "shutting down (detaching sandboxes, leaving boxes alive)");
+    ctx.automations.stop();
     server.close();
     ctx.sandboxes.detachAll();
     process.exit(0);

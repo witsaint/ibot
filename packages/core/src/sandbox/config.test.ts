@@ -120,7 +120,7 @@ describe("loadSandboxConfig", () => {
     });
 
     it("swaps in the verified public base on the public channel (public lacks e2b/base)", () => {
-      expect(cfg.baseImageFor("e2b/base", "ppio-sandbox-public")).toBe("zsob2dxzqa2lcepse0b0");
+      expect(cfg.baseImageFor("e2b/base", "ppio-sandbox-public")).toBe("xf3sz12wrms461c4h5dt");
     });
 
     it("honours a custom SANDBOX_PUBLIC_BASE_IMAGE override for the public channel", () => {
@@ -143,7 +143,7 @@ describe("loadSandboxConfig", () => {
         SANDBOX_CONTROL_PLANE_URL: OK_URL,
         SANDBOX_PUBLIC: "true",
       });
-      expect(pub.baseImageFor("e2b/base")).toBe("zsob2dxzqa2lcepse0b0");
+      expect(pub.baseImageFor("e2b/base")).toBe("xf3sz12wrms461c4h5dt");
     });
   });
 

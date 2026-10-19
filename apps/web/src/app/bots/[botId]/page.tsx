@@ -4,10 +4,13 @@ import type { UIMessage } from "ai";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { Bot } from "@i-bot/types";
+import type { Bot, WebPreview } from "@i-bot/types";
 import { api, ApiError } from "@/lib/api";
+import { redirectToSignIn } from "@/lib/session";
+import { AutomationPanel } from "@/components/AutomationPanel";
+import { Zap } from "lucide-react";
 import { ChatPanel } from "@/components/ChatPanel";
-import { DesktopPanel } from "@/components/DesktopPanel";
+import { WorkspacePreview } from "@/components/WorkspacePreview";
 import { BotAvatarValue } from "@/lib/avatar";
 
 export default function WorkspacePage() {
@@ -18,7 +21,10 @@ export default function WorkspacePage() {
   const [bot, setBot] = useState<Bot | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [initialMessages, setInitialMessages] = useState<UIMessage[] | null>(null);
+  const [webPreviews, setWebPreviews] = useState<WebPreview[]>([]);
   const [desktopActive, setDesktopActive] = useState(false);
+  const [automationUnread, setAutomationUnread] = useState(0);
+  const [automationOpen, setAutomationOpen] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
   // Chat/desktop split: the chat column's width in px, user-draggable and remembered across visits.
@@ -82,7 +88,7 @@ export default function WorkspacePage() {
           msgs.map((m) => ({ id: m.id, role: m.role, parts: m.parts })) as UIMessage[],
         );
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) router.replace("/");
+        if (err instanceof ApiError && err.status === 401) redirectToSignIn();
         else setNotFound(true);
       }
     })();
@@ -107,6 +113,26 @@ export default function WorkspacePage() {
     window.addEventListener("ibot:bots-changed", onChanged);
     return () => window.removeEventListener("ibot:bots-changed", onChanged);
   }, [botId]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () =>
+      api
+        .automationAttention(botId)
+        .then((value) => {
+          if (active) setAutomationUnread(value.unread);
+          return null;
+        })
+        .catch(() => {});
+    void refresh();
+    const timer = setInterval(() => {
+      void refresh();
+    }, 15000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [botId, automationOpen]);
 
   if (notFound) {
     return (
@@ -164,7 +190,37 @@ export default function WorkspacePage() {
             {bot.model}
           </span>
         )}
+        <button
+          className="btn btn-sm"
+          style={{ marginLeft: "auto" }}
+          disabled={!conversationId}
+          onClick={() => setAutomationOpen(true)}
+        >
+          <Zap size={14} />
+          自动化
+          {automationUnread > 0 && (
+            <span className="automation-unread" aria-label={`${automationUnread} 条未读结果`}>
+              {automationUnread}
+            </span>
+          )}
+        </button>
       </header>
+      {automationOpen && conversationId && (
+        <AutomationPanel
+          botId={botId}
+          conversationId={conversationId}
+          onClose={() => setAutomationOpen(false)}
+          onOpenConversation={async (id) => {
+            const msgs = await api.listMessages(id);
+            setConversationId(id);
+            setInitialMessages(
+              msgs.map((m) => ({ id: m.id, role: m.role, parts: m.parts })) as UIMessage[],
+            );
+            setWebPreviews([]);
+            setAutomationOpen(false);
+          }}
+        />
+      )}
 
       <div ref={splitRef} style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* left: chat — width is user-draggable via the divider */}
@@ -179,10 +235,13 @@ export default function WorkspacePage() {
         >
           {conversationId && initialMessages !== null ? (
             <ChatPanel
+              key={conversationId}
               botId={botId}
               conversationId={conversationId}
               initialMessages={initialMessages}
               desktopActive={desktopActive}
+              avatar={bot?.avatar}
+              onWebPreviewsChange={setWebPreviews}
             />
           ) : (
             <div style={{ display: "grid", placeItems: "center", height: "100%" }}>
@@ -222,7 +281,11 @@ export default function WorkspacePage() {
 
         {/* right: live desktop */}
         <section style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <DesktopPanel botId={botId} onActive={setDesktopActive} />
+          <WorkspacePreview
+            botId={botId}
+            previews={webPreviews}
+            onDesktopActive={setDesktopActive}
+          />
         </section>
       </div>
     </div>

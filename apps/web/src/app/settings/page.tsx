@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ModelCredentialsView, ModelInfo } from "@i-bot/types";
 import { api, ApiError } from "@/lib/api";
+import { redirectToSignIn } from "@/lib/session";
 
 /**
  * Settings — the tenant's own model credential. Multi-tenant by design: the platform never
@@ -48,7 +49,7 @@ export default function SettingsPage() {
         return null;
       })
       .catch((err) => {
-        if (err instanceof ApiError && err.status === 401) router.replace("/");
+        if (err instanceof ApiError && err.status === 401) redirectToSignIn();
         else setCred({ configured: false, keyHint: null, baseUrl: null, defaultModel: null });
       });
   }, [router]);

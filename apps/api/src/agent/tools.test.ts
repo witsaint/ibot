@@ -4,11 +4,11 @@
  * box command is never actually run. Releasing control re-enables input on the next action.
  */
 import { randomBytes } from "node:crypto";
-import type { SandboxHandle } from "@i-bot/core";
+import { fakeSandboxFiles, type SandboxHandle } from "@i-bot/core";
 import type { Database } from "@i-bot/db";
 import { describe, expect, it } from "vitest";
 import { encryptSecret } from "../crypto.js";
-import { buildSandboxTools } from "./tools.js";
+import { buildSandboxTools, CORE_TOOLS } from "./tools.js";
 
 /** A handle that records every shell command so we can assert none ran when locked. */
 function recordingHandle(): { handle: SandboxHandle; commands: string[] } {
@@ -16,6 +16,7 @@ function recordingHandle(): { handle: SandboxHandle; commands: string[] } {
   const handle: SandboxHandle = {
     id: "row-1",
     provider: "ppio",
+    files: fakeSandboxFiles(),
     providerSandboxId: "sbx-1",
     meta: {},
     getHost: (port) => `${port}-sbx-1.example`,
@@ -126,6 +127,23 @@ describe("buildSandboxTools mode gating", () => {
     expect(buildSandboxTools(handle).tools.request_handoff).toBeUndefined();
     expect(buildSandboxTools(handle, { onHandoff: () => {} }).tools.request_handoff).toBeDefined();
   });
+
+  /**
+   * `CORE_TOOLS` is the declared vocabulary of the platform's own primitives: it becomes the
+   * `@ibot/core` plugin's `providedTools`, and it's what an agent's tool allowlist is validated
+   * against. A tool added to the builder but not declared would be invisible to the plugin layer (and
+   * unusable in an allowlist), so the two are asserted equal rather than trusted to stay in step.
+   */
+  it("declares exactly the tools the builder can produce", () => {
+    const { handle } = recordingHandle();
+    const { tools } = buildSandboxTools(handle, {
+      mode: "full",
+      tenant: { db: {} as never, botId: "bot-1" },
+      spawnTask: async () => ({ taskId: "t-1" }),
+      onHandoff: () => {},
+    });
+    expect(CORE_TOOLS.map((t) => t.name).sort()).toEqual(Object.keys(tools).sort());
+  });
 });
 
 describe("request_handoff tool", () => {
@@ -165,6 +183,7 @@ describe("run_command tool", () => {
     const handle: SandboxHandle = {
       id: "row-1",
       provider: "ppio",
+      files: fakeSandboxFiles(),
       providerSandboxId: "sbx-1",
       meta: {},
       getHost: (p) => `${p}-sbx-1.example`,
@@ -195,6 +214,7 @@ describe("run_command tool", () => {
     const handle: SandboxHandle = {
       id: "row-1",
       provider: "ppio",
+      files: fakeSandboxFiles(),
       providerSandboxId: "sbx-1",
       meta: {},
       getHost: (p) => `${p}-sbx-1.example`,
@@ -493,6 +513,7 @@ describe("run_command secret injection", () => {
     const handle: SandboxHandle = {
       id: "row-1",
       provider: "ppio",
+      files: fakeSandboxFiles(),
       providerSandboxId: "sbx-1",
       meta: {},
       getHost: (p) => `${p}-sbx-1.example`,
@@ -591,6 +612,7 @@ describe("save_skill tool", () => {
     const handle: SandboxHandle = {
       id: "row-1",
       provider: "ppio",
+      files: fakeSandboxFiles(),
       providerSandboxId: "sbx-1",
       meta: {},
       getHost: (p) => `${p}-sbx-1.example`,
@@ -606,9 +628,17 @@ describe("save_skill tool", () => {
   }
 
   // A db stub whose skills.insert().values().returning() yields a generated id and records the row.
-  function skillDb(): { db: Database; inserted: Record<string, unknown>[] } {
+  // `localPluginId` is what the bot's `local` plugin lookup answers — null models a bot that has
+  // none yet (one created before plugins existed, until the backfill runs).
+  function skillDb(localPluginId: string | null = "local-plugin-1"): {
+    db: Database;
+    inserted: Record<string, unknown>[];
+  } {
     const inserted: Record<string, unknown>[] = [];
     const db = {
+      query: {
+        plugins: { findFirst: async () => (localPluginId ? { id: localPluginId } : undefined) },
+      },
       insert: () => ({
         values: (v: Record<string, unknown>) => {
           inserted.push(v);
@@ -656,10 +686,29 @@ describe("save_skill tool", () => {
       name: "Send Lark message",
     });
     expect(inserted[0]!.secretRefs).toEqual(["lark_token"]);
+    // stamped into the bot's own `local` plugin — the one editable, exportable bundle
+    expect(inserted[0]!.pluginId).toBe("local-plugin-1");
     // file rendered into the box under the new skill's dir
     const write = commands.find((c) => c.includes("base64 -d"));
     expect(write).toContain("/root/.ibot/skills/sk-new/bin/send.sh");
     expect(write).toContain("chmod");
+  });
+
+  it("still saves when the bot has no local plugin yet (a null plugin_id, not a failure)", async () => {
+    const { handle } = fileRecordingHandle();
+    const { db, inserted } = skillDb(null);
+    const { tools } = buildSandboxTools(handle, { tenant: { db, botId: "bot-1" } });
+
+    const t = tools.save_skill as {
+      execute: (i: unknown, o: unknown) => Promise<{ ok: boolean }>;
+    };
+    const res = await t.execute(
+      { name: "Thing", description: "d", playbook: "p" },
+      { toolCallId: "s2", messages: [] },
+    );
+
+    expect(res.ok).toBe(true);
+    expect(inserted[0]!.pluginId).toBeNull();
   });
 
   it("saves a file-less skill without any box write", async () => {
@@ -694,6 +743,8 @@ describe("bind_mcp tool", () => {
       }),
       query: {
         bots: { findFirst: async () => ({ ownerId: "owner-1" }) },
+        // the bot's `local` plugin — a server the bot bound itself belongs to it
+        plugins: { findFirst: async () => ({ id: "local-plugin-1" }) },
         tenantSecrets: {
           findMany: async () =>
             Object.entries(secrets).map(([name, value]) => ({
@@ -714,6 +765,7 @@ describe("bind_mcp tool", () => {
   const handle: SandboxHandle = {
     id: "row-1",
     provider: "ppio",
+    files: fakeSandboxFiles(),
     providerSandboxId: "sbx-1",
     meta: {},
     getHost: (p) => `${p}-sbx-1.example`,
@@ -760,6 +812,7 @@ describe("bind_mcp tool", () => {
       name: "lark",
       transport: "http",
       enabled: true,
+      pluginId: "local-plugin-1",
     });
     expect(JSON.stringify(inserted[0]!.headers)).toContain("{{secrets.lark_token}}");
     expect(JSON.stringify(inserted[0]!.headers)).not.toContain("s3cr3t");
